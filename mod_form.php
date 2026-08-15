@@ -21,6 +21,7 @@ class mod_readingassessment_mod_form extends moodleform_mod {
 
         // Student Attempt Controls
         $mform->addElement('header', 'attempt_settings', get_string('attempt_history', 'mod_readingassessment'));
+        
         $attempt_options = [
             0 => get_string('unlimited', 'mod_readingassessment'),
             1 => '1 attempt',
@@ -33,6 +34,16 @@ class mod_readingassessment_mod_form extends moodleform_mod {
         $mform->setDefault('maxattempts', 0);
         $mform->addHelpButton('maxattempts', 'maxattempts', 'mod_readingassessment');
 
+        $grade_method_options = [
+            1 => get_string('gradehighest', 'mod_readingassessment'),
+            2 => get_string('gradeaverage', 'mod_readingassessment'),
+            3 => get_string('gradefirst', 'mod_readingassessment'),
+            4 => get_string('gradelast', 'mod_readingassessment'),
+        ];
+        $mform->addElement('select', 'grademethod', get_string('grademethod', 'mod_readingassessment'), $grade_method_options);
+        $mform->setDefault('grademethod', 1);
+        $mform->addHelpButton('grademethod', 'grademethod', 'mod_readingassessment');
+
         // Reading Passage Section
         $mform->addElement('header', 'passage_section', get_string('passage', 'mod_readingassessment'));
         $mform->addElement('textarea', 'passage', get_string('passage', 'mod_readingassessment'), 'wrap="virtual" rows="10" cols="80"');
@@ -40,10 +51,17 @@ class mod_readingassessment_mod_form extends moodleform_mod {
         $mform->addRule('passage', null, 'required', null, 'client');
         $mform->addHelpButton('passage', 'passage', 'mod_readingassessment');
 
-        // User-Friendly Comprehension Question Builder (5 Questions)
+        // User-Friendly Comprehension Question Builder (Up to 10 Questions)
         $mform->addElement('header', 'questions_section', get_string('question_builder', 'mod_readingassessment'));
 
-        for ($i = 0; $i < 5; $i++) {
+        $numq_options = [];
+        for ($n = 1; $n <= 10; $n++) {
+            $numq_options[$n] = "{$n} question" . ($n > 1 ? 's' : '');
+        }
+        $mform->addElement('select', 'numquestions', get_string('numquestions', 'mod_readingassessment'), $numq_options);
+        $mform->setDefault('numquestions', 3);
+
+        for ($i = 0; $i < 10; $i++) {
             $num = $i + 1;
             $mform->addElement('static', "q_header_{$i}", "<strong>" . get_string('question_n', 'mod_readingassessment', $num) . "</strong>");
 
@@ -91,8 +109,10 @@ class mod_readingassessment_mod_form extends moodleform_mod {
         if (!empty($default_values['questions_json'])) {
             $questions = json_decode($default_values['questions_json'], true);
             if (is_array($questions)) {
+                $count = count($questions);
+                $default_values['numquestions'] = max(1, min(10, $count));
                 foreach ($questions as $i => $q) {
-                    if ($i >= 5) break;
+                    if ($i >= 10) break;
                     $default_values["q_text_{$i}"] = $q['question'] ?? '';
                     if (isset($q['options']) && is_array($q['options'])) {
                         $default_values["q_opta_{$i}"] = $q['options'][0] ?? '';

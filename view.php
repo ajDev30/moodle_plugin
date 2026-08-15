@@ -55,6 +55,11 @@ if ($action === 'submit' && data_submitted() && confirm_sesskey()) {
     exit;
 }
 
+// Service URL dynamic determination
+$serviceport = get_config('readingassessment', 'service_port') ?: 8000;
+$server_host = parse_url($CFG->wwwroot, PHP_URL_HOST) ?: 'localhost';
+$asr_service_url = "http://{$server_host}:{$serviceport}";
+
 // Set up page
 $PAGE->set_url('/mod/readingassessment/view.php', ['id' => $cm->id]);
 $PAGE->set_title(format_string($readingassessment->name));
@@ -109,13 +114,10 @@ if ($attempts_exhausted) {
 
         <div class="ra-controls">
             <button id="ra-btn-start" class="ra-btn ra-btn-start" <?php echo $attempts_exhausted ? 'disabled' : ''; ?>>
-                <span>▶</span> Start Test
+                <span>▶</span> Start
             </button>
-            <button id="ra-btn-pause" class="ra-btn ra-btn-pause" disabled>
-                <span>⏸</span> Pause
-            </button>
-            <button id="ra-btn-submit" class="ra-btn ra-btn-submit" disabled>
-                <span>⏹</span> Stop & Submit
+            <button id="ra-btn-retry" class="ra-btn ra-btn-retry" disabled>
+                <span>🔄</span> Retry
             </button>
         </div>
 
@@ -126,7 +128,7 @@ if ($attempts_exhausted) {
                 if ($attempts_exhausted) {
                     echo get_string('attempts_exhausted', 'mod_readingassessment', $maxattempts);
                 } else {
-                    echo "Ready. Click [Start Test] when you are ready to read.";
+                    echo "Ready. Click [Start] when you are ready to read.";
                 }
                 ?>
             </span>
@@ -143,7 +145,7 @@ if ($attempts_exhausted) {
         <div class="ra-card-title">❓ Reading Comprehension Questions</div>
         <form id="ra-quiz-form">
             <?php foreach ($questions as $qidx => $q): ?>
-                <div class="ra-question-item">
+                <div class="ra-question-item" id="ra-qitem-<?php echo $qidx; ?>">
                     <div class="ra-question-text"><?php echo ($qidx + 1) . '. ' . s($q['question']); ?></div>
                     <?php if (isset($q['options']) && is_array($q['options'])): ?>
                         <?php foreach ($q['options'] as $oidx => $opt): ?>
@@ -156,6 +158,18 @@ if ($attempts_exhausted) {
                 </div>
             <?php endforeach; ?>
         </form>
+
+        <div style="margin-top: 24px; text-align: right;">
+            <button id="ra-btn-submit" class="ra-btn ra-btn-submit" <?php echo $attempts_exhausted ? 'disabled' : ''; ?>>
+                <span>📤</span> Submit Assessment
+            </button>
+        </div>
+    </div>
+    <?php else: ?>
+    <div style="margin-top: 24px; text-align: right;">
+        <button id="ra-btn-submit" class="ra-btn ra-btn-submit" <?php echo $attempts_exhausted ? 'disabled' : ''; ?>>
+            <span>📤</span> Submit Assessment
+        </button>
     </div>
     <?php endif; ?>
 
@@ -213,7 +227,8 @@ document.addEventListener("DOMContentLoaded", function() {
         passage: <?php echo json_encode($readingassessment->passage); ?>,
         questions: <?php echo json_encode($questions); ?>,
         sesskey: "<?php echo sesskey(); ?>",
-        wwwroot: <?php echo json_encode($CFG->wwwroot); ?>
+        wwwroot: <?php echo json_encode($CFG->wwwroot); ?>,
+        asr_service_url: <?php echo json_encode($asr_service_url); ?>
     });
 });
 </script>

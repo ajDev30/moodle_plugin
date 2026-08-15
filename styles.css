@@ -48,7 +48,7 @@
 .ra-btn {
     font-size: 1rem;
     font-weight: 600;
-    padding: 10px 20px;
+    padding: 10px 22px;
     border-radius: 8px;
     border: none;
     cursor: pointer;
@@ -67,18 +67,36 @@
     background-color: #15803d;
 }
 
-.ra-btn-pause {
-    background-color: #eab308;
+.ra-btn-done {
+    background-color: #ea580c;
+    color: #ffffff;
+    animation: pulse-border 1.5s infinite;
+}
+
+.ra-btn-done:hover:not(:disabled) {
+    background-color: #c2410c;
+}
+
+@keyframes pulse-border {
+    0% { box-shadow: 0 0 0 0 rgba(234, 88, 12, 0.4); }
+    70% { box-shadow: 0 0 0 8px rgba(234, 88, 12, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(234, 88, 12, 0); }
+}
+
+.ra-btn-retry {
+    background-color: #0284c7;
     color: #ffffff;
 }
 
-.ra-btn-pause:hover:not(:disabled) {
-    background-color: #ca8a04;
+.ra-btn-retry:hover:not(:disabled) {
+    background-color: #0369a1;
 }
 
 .ra-btn-submit {
     background-color: #2563eb;
     color: #ffffff;
+    font-size: 1.1rem;
+    padding: 12px 28px;
 }
 
 .ra-btn-submit:hover:not(:disabled) {
@@ -88,6 +106,56 @@
 .ra-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* Progress Bar & Console Styling */
+.ra-progress-wrapper {
+    margin-top: 20px;
+    padding: 24px;
+    background: #f8fafc;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+
+.ra-progress-track {
+    height: 26px;
+    border-radius: 13px;
+    background: #e2e8f0;
+    overflow: hidden;
+    margin-bottom: 12px;
+}
+
+.ra-progress-bar {
+    height: 100%;
+    width: 0%;
+    background-color: #16a34a;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    line-height: 26px;
+    text-align: center;
+    transition: width 0.4s ease-in-out;
+    background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+    background-size: 1rem 1rem;
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+    0% { background-position: 1rem 0; }
+    100% { background-position: 0 0; }
+}
+
+.ra-progress-console {
+    background: #0f172a;
+    color: #38bdf8;
+    padding: 14px;
+    border-radius: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
 }
 
 /* VAD Indicator */
@@ -118,8 +186,16 @@
 /* Comprehension Questions */
 .ra-question-item {
     margin-bottom: 20px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid #f1f5f9;
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid #f1f5f9;
+    transition: all 0.3s ease;
+}
+
+.ra-question-unanswered {
+    border: 2px solid #ef4444 !important;
+    background-color: #fef2f2 !important;
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15);
 }
 
 .ra-question-text {
@@ -131,7 +207,7 @@
 .ra-option-label {
     display: block;
     padding: 8px 12px;
-    background: #f8fafc;
+    background: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
     margin-bottom: 6px;
@@ -139,7 +215,7 @@
 }
 
 .ra-option-label:hover {
-    background: #f1f5f9;
+    background: #f8fafc;
 }
 
 /* 3-Tier Word Color Highlighting */

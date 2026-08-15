@@ -28,11 +28,14 @@ function readingassessment_supports($feature) {
 }
 
 /**
- * Helper to bundle form question fields into JSON.
+ * Helper to bundle form question fields into JSON based on numquestions.
  */
 function readingassessment_process_questions_from_form($data) {
     $questions = [];
-    for ($i = 0; $i < 5; $i++) {
+    $numq = isset($data->numquestions) ? intval($data->numquestions) : 10;
+    $numq = max(1, min(10, $numq));
+
+    for ($i = 0; $i < $numq; $i++) {
         $qtext_key = "q_text_{$i}";
         if (!empty($data->$qtext_key)) {
             $qtext = trim($data->$qtext_key);
@@ -70,9 +73,11 @@ function readingassessment_add_instance($data, $mform = null) {
     if (!isset($data->passage)) {
         $data->passage = '';
     }
-
     if (!isset($data->maxattempts)) {
         $data->maxattempts = 0;
+    }
+    if (!isset($data->grademethod)) {
+        $data->grademethod = 1;
     }
 
     // Process questions from form inputs
@@ -97,6 +102,9 @@ function readingassessment_update_instance($data, $mform = null) {
 
     if (!isset($data->maxattempts)) {
         $data->maxattempts = 0;
+    }
+    if (!isset($data->grademethod)) {
+        $data->grademethod = 1;
     }
 
     // Process questions from form inputs
@@ -157,7 +165,8 @@ function readingassessment_grade_item_delete($readingassessment) {
 }
 
 /**
- * Update student grade in Gradebook for this activity.
+ * Update student grade in Gradebook based on activity grademethod.
+ * grademethod: 1 = Highest Grade, 2 = Average Grade, 3 = First Attempt, 4 = Last Attempt
  */
 function readingassessment_update_grades($readingassessment, $userid = 0, $nullifnone = true) {
     global $DB;
@@ -166,18 +175,42 @@ function readingassessment_update_grades($readingassessment, $userid = 0, $nulli
         $attempts = $DB->get_records('readingassessment_attempts', [
             'readingassessmentid' => $readingassessment->id,
             'userid' => $userid
-        ], 'timecompleted DESC', '*', 0, 1);
+        ], 'attempt ASC');
 
         if (!empty($attempts)) {
-            $latest = reset($attempts);
+            $grademethod = intval($readingassessment->grademethod ?? 1);
+            $scores = array_map(function($a) {
+                return (float)$a->final_grade;
+            }, array_values($attempts));
+
+            $dategraded = end($attempts)->timecompleted;
+            $calculated_grade = 0.0;
+
+            switch ($grademethod) {
+                case 2: // Average Grade
+                    $calculated_grade = array_sum($scores) / count($scores);
+                    break;
+                case 3: // First Attempt
+                    $calculated_grade = $scores[0];
+                    break;
+                case 4: // Last Attempt
+                    $calculated_grade = end($scores);
+                    break;
+                case 1: // Highest Grade (default)
+                default:
+                    $calculated_grade = max($scores);
+                    break;
+            }
+
             $grades = [
                 'userid' => $userid,
-                'rawgrade' => $latest->final_grade,
-                'dategraded' => $latest->timecompleted
+                'rawgrade' => round($calculated_grade, 2),
+                'dategraded' => $dategraded
             ];
         } else {
             $grades = $nullifnone ? ['userid' => $userid, 'rawgrade' => null] : null;
         }
+
         readingassessment_grade_item_update($readingassessment, $grades);
     }
 }
