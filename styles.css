@@ -1,0 +1,182 @@
+/* Reading Assessment CSS Styles */
+
+.reading-assessment-container {
+    max-width: 900px;
+    margin: 20px auto;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.ra-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.ra-card-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ra-passage-box {
+    font-size: 1.25rem;
+    line-height: 1.9;
+    color: #334155;
+    background: #f8fafc;
+    border-left: 4px solid #3b82f6;
+    padding: 24px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+/* Audio Control Buttons */
+.ra-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.ra-btn {
+    font-size: 1rem;
+    font-weight: 600;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ra-btn-start {
+    background-color: #16a34a;
+    color: #ffffff;
+}
+
+.ra-btn-start:hover:not(:disabled) {
+    background-color: #15803d;
+}
+
+.ra-btn-pause {
+    background-color: #eab308;
+    color: #ffffff;
+}
+
+.ra-btn-pause:hover:not(:disabled) {
+    background-color: #ca8a04;
+}
+
+.ra-btn-submit {
+    background-color: #2563eb;
+    color: #ffffff;
+}
+
+.ra-btn-submit:hover:not(:disabled) {
+    background-color: #1d4ed8;
+}
+
+.ra-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* VAD Indicator */
+.ra-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    font-weight: 500;
+    color: #475569;
+}
+
+.ra-vad-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #94a3b8;
+    transition: background-color 0.2s ease;
+}
+
+.ra-vad-active .ra-vad-dot {
+    background-color: #22c55e;
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.2);
+}
+
+/* Comprehension Questions */
+.ra-question-item {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.ra-question-text {
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 10px;
+}
+
+.ra-option-label {
+    display: block;
+    padding: 8px 12px;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    cursor: pointer;
+}
+
+.ra-option-label:hover {
+    background: #f1f5f9;
+}
+
+/* 3-Tier Word Color Highlighting */
+.word-good {
+    color: #16a34a;
+    font-weight: 700;
+    background-color: #dcfce7;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin: 0 2px;
+}
+
+.word-improvement {
+    color: #b45309;
+    font-weight: 700;
+    background-color: #fef3c7;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin: 0 2px;
+}
+
+.word-miscue {
+    color: #dc2626;
+    font-weight: 700;
+    background-color: #fee2e2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin: 0 2px;
+    text-decoration: line-through;
+}
+
+.ra-score-badge {
+    display: inline-block;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #ffffff;
+    background-color: #2563eb;
+}
