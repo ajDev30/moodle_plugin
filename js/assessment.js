@@ -4,15 +4,15 @@ window.ReadingAssessment = (function() {
     let microphoneStream = null;
     let speechRecognition = null;
     let isRecording = false;
-    let isPaused = false;
     let liveTranscript = "";
     let finalTranscript = "";
     let heldEvaluationData = null;
     let retryCount = 0;
+    let asrEngineUsed = "openai"; // 'openai' or 'browser'
 
     const ASR_SERVICE_URL = "http://localhost:8000";
 
-    // Jaro-Winkler helper for live browser highlighting
+    // Jaro-Winkler string distance
     function jaroWinkler(s1, s2) {
         if (s1 === s2) return 1.0;
         let l1 = s1.length, l2 = s2.length;
@@ -50,6 +50,120 @@ window.ReadingAssessment = (function() {
         return sim + prefix * p * (1 - sim);
     }
 
+    // Metaphone algorithm: reduces words to consonant-based phonetic roots
+    function metaphone(word) {
+        if (!word) return "";
+        let str = word.toUpperCase().replace(/[^A-Z]/g, "");
+        if (!str) return "";
+
+        // Drop initial silent letters
+        if (/^(KN|GN|PN|AE|WR)/.test(str)) {
+            str = str.substring(1);
+        } else if (/^X/.test(str)) {
+            str = "S" + str.substring(1);
+        } else if (/^WH/.test(str)) {
+            str = "W" + str.substring(2);
+        }
+
+        let meta = "";
+        let len = str.length;
+
+        for (let i = 0; i < len; i++) {
+            let c = str[i];
+            let next = (i < len - 1) ? str[i + 1] : "";
+            let prev = (i > 0) ? str[i - 1] : "";
+
+            if (c === "B") {
+                if (prev === "M" && i === len - 1) continue;
+                meta += "B";
+            } else if (c === "C") {
+                if (next === "H") {
+                    meta += "X";
+                    i++;
+                } else if (next === "I" || next === "E" || next === "Y") {
+                    meta += "S";
+                } else {
+                    meta += "K";
+                }
+            } else if (c === "D") {
+                if (next === "G" && (i + 2 < len) && (str[i + 2] === "E" || str[i + 2] === "I" || str[i + 2] === "Y")) {
+                    meta += "J";
+                    i += 2;
+                } else {
+                    meta += "T";
+                }
+            } else if (c === "G") {
+                if (next === "H" && i === len - 2) continue;
+                if (next === "N" && i === len - 2) continue;
+                if (next === "I" || next === "E" || next === "Y") {
+                    meta += "J";
+                } else {
+                    meta += "K";
+                }
+            } else if (c === "H") {
+                if (/[AEIOU]/.test(next) && (!/[CSPTG]/.test(prev))) {
+                    meta += "H";
+                }
+            } else if (c === "F" || c === "J" || c === "L" || c === "M" || c === "N" || c === "R") {
+                meta += c;
+            } else if (c === "K") {
+                if (prev !== "C") meta += "K";
+            } else if (c === "P") {
+                if (next === "H") {
+                    meta += "F";
+                    i++;
+                } else {
+                    meta += "P";
+                }
+            } else if (c === "Q") {
+                meta += "K";
+            } else if (c === "S") {
+                if (next === "H") {
+                    meta += "X";
+                    i++;
+                } else {
+                    meta += "S";
+                }
+            } else if (c === "T") {
+                if (next === "H") {
+                    meta += "0";
+                    i++;
+                } else if (next === "I" && (i + 2 < len) && (str[i + 2] === "O" || str[i + 2] === "A")) {
+                    meta += "X";
+                } else {
+                    meta += "T";
+                }
+            } else if (c === "V") {
+                meta += "F";
+            } else if (c === "W" || c === "Y") {
+                if (/[AEIOU]/.test(next)) meta += c;
+            } else if (c === "X") {
+                meta += "KS";
+            } else if (c === "Z") {
+                meta += "S";
+            } else if (i === 0 && /[AEIOU]/.test(c)) {
+                meta += c;
+            }
+        }
+        return meta;
+    }
+
+    // Hybrid Jaro-Winkler (60%) + Metaphone (40%) Similarity
+    function computePhoneticSimilarity(w1, w2) {
+        if (!w1 || !w2) return 0.0;
+        if (w1 === w2) return 1.0;
+
+        let strSim = jaroWinkler(w1, w2);
+        let m1 = metaphone(w1);
+        let m2 = metaphone(w2);
+
+        if (m1 && m2) {
+            let metaSim = (m1 === m2) ? 1.0 : jaroWinkler(m1, m2);
+            return (strSim * 0.6) + (metaSim * 0.4);
+        }
+        return strSim;
+    }
+
     function updateLivePassageHighlighting(passageText, currentTranscript) {
         const passageBox = document.getElementById("ra-passage-text");
         if (!passageBox || !passageText) return;
@@ -73,7 +187,7 @@ window.ReadingAssessment = (function() {
 
             let windowEnd = Math.min(spokenIdx + 4, cleanSpokenWords.length);
             for (let s = spokenIdx; s < windowEnd; s++) {
-                let sim = jaroWinkler(cleanWord, cleanSpokenWords[s]);
+                let sim = computePhoneticSimilarity(cleanWord, cleanSpokenWords[s]);
                 if (sim > bestSim) {
                     bestSim = sim;
                     bestIdx = s;
@@ -82,7 +196,7 @@ window.ReadingAssessment = (function() {
 
             if (bestIdx !== -1 && bestSim >= 0.75) {
                 spokenIdx = bestIdx + 1;
-                if (bestSim >= 0.92) {
+                if (bestSim >= 0.90) {
                     html += `<span class="word-good">${token}</span>`;
                 } else {
                     html += `<span class="word-improvement">${token}</span>`;
@@ -140,18 +254,25 @@ window.ReadingAssessment = (function() {
         passageBox.innerHTML = html;
     }
 
+    // Immediately stop microphone & close WebRTC connection to conserve API credits
     function stopRecordingMedia() {
         if (microphoneStream) {
-            microphoneStream.getTracks().forEach(t => t.stop());
+            microphoneStream.getTracks().forEach(t => {
+                try { t.stop(); } catch(e) {}
+            });
             microphoneStream = null;
         }
-        if (speechRecognition) {
-            speechRecognition.stop();
-            speechRecognition = null;
+        if (dataChannel) {
+            try { dataChannel.close(); } catch(e) {}
+            dataChannel = null;
         }
         if (pc) {
-            pc.close();
+            try { pc.close(); } catch(e) {}
             pc = null;
+        }
+        if (speechRecognition) {
+            try { speechRecognition.stop(); } catch(e) {}
+            speechRecognition = null;
         }
     }
 
@@ -169,6 +290,8 @@ window.ReadingAssessment = (function() {
         retryBtn.disabled = true;
 
         const questions = config.questions || [];
+        const asrServiceUrl = config.asr_service_url || ASR_SERVICE_URL;
+        const attemptsExhausted = (config.attempts_exhausted === true);
 
         // Clear unanswered highlights when student picks an answer
         questions.forEach((q, idx) => {
@@ -212,11 +335,51 @@ window.ReadingAssessment = (function() {
                 // START RECORDING
                 try {
                     startBtn.disabled = true;
-                    statusText.textContent = "Connecting to ASR service...";
 
+                    // Practice Mode only if max attempts reached
+                    if (attemptsExhausted) {
+                        asrEngineUsed = "browser";
+                        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
+                        if (!SpeechRecognitionClass) {
+                            throw new Error("Web Speech API not supported in this browser. Please use Chrome/Edge.");
+                        }
+
+                        speechRecognition = new SpeechRecognitionClass();
+                        speechRecognition.continuous = true;
+                        speechRecognition.interimResults = true;
+                        speechRecognition.lang = 'en-US';
+
+                        speechRecognition.onresult = (event) => {
+                            let interimStr = '';
+                            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                                if (event.results[i].isFinal) {
+                                    finalTranscript += event.results[i][0].transcript + ' ';
+                                } else {
+                                    interimStr += event.results[i][0].transcript;
+                                }
+                            }
+                            const full = finalTranscript + interimStr;
+                            if (transcriptDisplay) transcriptDisplay.textContent = full;
+                            updateLivePassageHighlighting(config.passage || '', full);
+                        };
+
+                        speechRecognition.start();
+                        isRecording = true;
+                        statusText.textContent = "Practice Mode Active (Browser Speech Engine) — Speak now. Zero OpenAI API credits used.";
+                        vadIndicator.classList.add("ra-vad-active");
+
+                        startBtn.innerHTML = "<span>✓</span> Done";
+                        startBtn.className = "ra-btn ra-btn-done";
+                        startBtn.disabled = false;
+                        retryBtn.disabled = false;
+                        return;
+                    }
+
+                    // Official Allowed Attempt -> Use OpenAI Realtime API
+                    statusText.textContent = "Connecting to ASR service...";
                     let clientSecret = null;
                     try {
-                        const sessResp = await fetch(`${ASR_SERVICE_URL}/session`, { method: "POST" });
+                        const sessResp = await fetch(`${asrServiceUrl}/session`, { method: "POST" });
                         const sessData = await sessResp.json().catch(() => ({}));
                         if (sessResp.ok && sessData.client_secret) {
                             clientSecret = sessData.client_secret;
@@ -226,13 +389,14 @@ window.ReadingAssessment = (function() {
                     }
 
                     if (clientSecret) {
-                        // --- WebRTC OpenAI Realtime ---
+                        // --- WebRTC OpenAI Realtime Engine ---
+                        asrEngineUsed = "openai";
                         pc = new RTCPeerConnection();
                         dataChannel = pc.createDataChannel("oai-events");
 
                         dataChannel.onopen = () => {
                             isRecording = true;
-                            statusText.textContent = "Recording active (OpenAI Realtime) — speak now. Click [Done] when finished.";
+                            statusText.textContent = "Recording active (Official AI Assessment) — speak now. Click [Done] when finished.";
                             vadIndicator.classList.add("ra-vad-active");
                             
                             startBtn.innerHTML = "<span>✓</span> Done";
@@ -293,7 +457,8 @@ window.ReadingAssessment = (function() {
                         await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
                     } else {
-                        // --- Web Speech API Fallback ---
+                        // Fallback to Web Speech API
+                        asrEngineUsed = "browser";
                         const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
                         if (!SpeechRecognitionClass) {
                             throw new Error("OpenAI API key missing and Web Speech API not supported in this browser.");
@@ -336,7 +501,7 @@ window.ReadingAssessment = (function() {
                 }
 
             } else {
-                // DONE CLICKED -> STOP RECORDING & EVALUATE READING SCORE (HOLD GRADES)
+                // DONE CLICKED -> IMMEDIATELY STOP WEBRTC / MIC & EVALUATE READING SCORE
                 stopRecordingMedia();
                 isRecording = false;
                 vadIndicator.classList.remove("ra-vad-active");
@@ -345,14 +510,22 @@ window.ReadingAssessment = (function() {
                 startBtn.innerHTML = "<span>▶</span> Start";
                 startBtn.className = "ra-btn ra-btn-start";
 
-                // Evaluate reading fluency with Python backend
+                // Reading Speed = (No. of words read ÷ Reading time in seconds) × 60
+                const readingTimeSeconds = readingStartTime ? Math.max(1, Math.round((Date.now() - readingStartTime) / 1000)) : 30;
+                const wordsList = (config.passage || '').trim().split(/\s+/);
+                const totalWords = wordsList.length;
+                const readingSpeedWPM = Math.round(((totalWords / readingTimeSeconds) * 60) * 100) / 100;
+
+                // Evaluate reading fluency with backend scoring service
                 try {
-                    const evalResp = await fetch(`${ASR_SERVICE_URL}/evaluate`, {
+                    const evalResp = await fetch(`${asrServiceUrl}/evaluate`, {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
                             passage: config.passage,
                             transcript: finalTranscript + " " + liveTranscript,
+                            reading_time: readingTimeSeconds,
+                            reading_speed: readingSpeedWPM,
                             answers: [],
                             correct_answers: [],
                             readingassessmentid: config.readingassessmentid,
@@ -361,12 +534,15 @@ window.ReadingAssessment = (function() {
                     });
 
                     const evalData = await evalResp.json();
+                    evalData.reading_time = readingTimeSeconds;
+                    evalData.reading_speed = readingSpeedWPM;
                     heldEvaluationData = evalData;
 
                     // Render evaluated 3-tier word highlighting
                     renderEvaluatedPassageHighlighting(config.passage || '', evalData.word_feedback);
 
-                    statusText.textContent = `Reading evaluated! Accuracy: ${evalData.accuracy_score}%. Complete comprehension questions below and click [Submit Assessment].`;
+                    let engineNote = (asrEngineUsed === "browser") ? " [Practice Mode - Browser Engine]" : " [Official AI Attempt]";
+                    statusText.textContent = `Reading evaluated! Accuracy: ${evalData.accuracy_score}% | ⚡ Speed: ${readingSpeedWPM} WPM (${readingTimeSeconds}s)${engineNote}. Complete questionnaire below and click [Submit Assessment].`;
 
                 } catch (err) {
                     console.error("Fluency evaluation error:", err);
@@ -386,7 +562,6 @@ window.ReadingAssessment = (function() {
             finalTranscript = "";
             heldEvaluationData = null;
 
-            // Reset passage display
             const passageBox = document.getElementById("ra-passage-text");
             if (passageBox) passageBox.textContent = config.passage || '';
             if (transcriptDisplay) transcriptDisplay.textContent = "";
@@ -400,14 +575,12 @@ window.ReadingAssessment = (function() {
 
         // --- Submit Assessment Button ---
         submitBtn.addEventListener("click", async () => {
-            // 1. Verify reading has been completed
             if (!heldEvaluationData && (finalTranscript.trim().length === 0 && liveTranscript.trim().length === 0)) {
                 statusText.textContent = "⚠️ Please read the passage and click [Done] before submitting.";
                 startBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 return;
             }
 
-            // If recorded but Done wasn't clicked, evaluate now
             if (isRecording) {
                 stopRecordingMedia();
                 isRecording = false;
@@ -416,34 +589,56 @@ window.ReadingAssessment = (function() {
                 startBtn.className = "ra-btn ra-btn-start";
             }
 
-            // 2. Mandatory Question Validation Check
-            if (!validateAllQuestionsAnswered()) {
-                statusText.textContent = "⚠️ Please answer all comprehension questions before submitting.";
-                return;
-            }
-
             submitBtn.disabled = true;
-            statusText.textContent = "Submitting full assessment...";
+            statusText.textContent = "Submitting assessment...";
 
-            // Gather student answers
+            const questions = config.questions || [];
             const studentAnswers = [];
             questions.forEach((q, idx) => {
-                const selected = document.querySelector(`input[name="q_${idx}"]:checked`);
-                studentAnswers.push(selected ? parseInt(selected.value) : -1);
+                const qtype = q.type || 'multichoice';
+                if (qtype === 'description') {
+                    studentAnswers.push(null);
+                } else if (qtype === 'multichoice') {
+                    const selected = document.querySelector(`input[name="ra_q_${idx}"]:checked`);
+                    studentAnswers.push(selected ? parseInt(selected.value) : -1);
+                } else if (qtype === 'truefalse') {
+                    const selected = document.querySelector(`input[name="ra_q_${idx}"]:checked`);
+                    studentAnswers.push(selected ? (selected.value === 'true') : null);
+                } else if (qtype === 'matching' || qtype === 'randommatch') {
+                    const pairs = q.pairs || [];
+                    const pairAns = [];
+                    pairs.forEach((p, pidx) => {
+                        const sel = document.querySelector(`select[name="ra_q_${idx}_p_${pidx}"]`);
+                        pairAns.push(sel ? sel.value : '');
+                    });
+                    studentAnswers.push(pairAns);
+                } else if (qtype === 'ordering') {
+                    const selects = document.querySelectorAll(`select[name^="ra_q_${idx}_ord_"]`);
+                    const orderAns = [];
+                    selects.forEach(sel => {
+                        const span = sel.nextElementSibling;
+                        orderAns.push({ order: parseInt(sel.value), text: span ? span.getAttribute('data-itemtext') : '' });
+                    });
+                    orderAns.sort((a, b) => a.order - b.order);
+                    studentAnswers.push(orderAns.map(o => o.text));
+                } else if (qtype === 'essay') {
+                    const ta = document.querySelector(`textarea[name="ra_q_${idx}"]`);
+                    studentAnswers.push(ta ? ta.value : '');
+                } else {
+                    const inp = document.querySelector(`input[name="ra_q_${idx}"]`);
+                    studentAnswers.push(inp ? inp.value : '');
+                }
             });
 
-            const correctAnswers = questions.map(q => q.correct !== undefined ? q.correct : 0);
-
             try {
-                // Perform final complete evaluation
-                const evalResp = await fetch(`${ASR_SERVICE_URL}/evaluate`, {
+                const evalResp = await fetch(`${asrServiceUrl}/evaluate`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         passage: config.passage,
                         transcript: finalTranscript + " " + liveTranscript,
                         answers: studentAnswers,
-                        correct_answers: correctAnswers,
+                        correct_answers: questions.map(q => q.correct !== undefined ? q.correct : 0),
                         readingassessmentid: config.readingassessmentid,
                         userid: config.userid
                     })
@@ -451,21 +646,23 @@ window.ReadingAssessment = (function() {
 
                 const evalData = await evalResp.json();
 
-                // Build submit URL
                 const wwwroot = config.wwwroot || window.location.origin;
                 const submitUrl = `${wwwroot}/mod/readingassessment/view.php?id=${config.cmid}&action=submit`;
 
                 const params = new URLSearchParams({
                     transcript: finalTranscript + " " + liveTranscript,
                     accuracy_score: evalData.accuracy_score,
-                    comprehension_score: evalData.comprehension_score,
-                    final_grade: evalData.final_grade,
+                    comprehension_score: evalData.comprehension_score || 100.0,
+                    final_grade: evalData.final_grade || evalData.accuracy_score,
+                    reading_time: evalData.reading_time || (heldEvaluationData ? heldEvaluationData.reading_time : 0),
+                    reading_speed: evalData.reading_speed || (heldEvaluationData ? heldEvaluationData.reading_speed : 0.0),
                     miscues_json: JSON.stringify(evalData.word_feedback || []),
                     answers_json: JSON.stringify(studentAnswers),
+                    asr_engine: asrEngineUsed,
                     sesskey: config.sesskey || ''
                 });
 
-                const moodleResp = await fetch(submitUrl, {
+                await fetch(submitUrl, {
                     method: "POST",
                     headers: { "Content-Type": "application/x-www-form-urlencoded" },
                     body: params

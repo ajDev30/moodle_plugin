@@ -11,8 +11,12 @@
         <FIELD NAME="name" TYPE="char" LENGTH="255" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="intro" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="introformat" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="activitytype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="assessment" SEQUENCE="false"/>
+        <FIELD NAME="tts_voice" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="alloy" SEQUENCE="false"/>
+        <FIELD NAME="mastery_repetitions" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="2" SEQUENCE="false"/>
         <FIELD NAME="passage" TYPE="text" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="questions_json" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
+        <FIELD NAME="linked_quizid" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="maxattempts" TYPE="int" LENGTH="6" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="grademethod" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="1" SEQUENCE="false"/>
         <FIELD NAME="grade" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="100" SEQUENCE="false"/>
@@ -36,6 +40,8 @@
         <FIELD NAME="accuracy_score" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="0.00" SEQUENCE="false"/>
         <FIELD NAME="comprehension_score" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="0.00" SEQUENCE="false"/>
         <FIELD NAME="final_grade" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="0.00" SEQUENCE="false"/>
+        <FIELD NAME="reading_time" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
+        <FIELD NAME="reading_speed" TYPE="number" LENGTH="10" DECIMALS="2" NOTNULL="true" DEFAULT="0.00" SEQUENCE="false"/>
         <FIELD NAME="miscues_json" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="answers_json" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="timecompleted" TYPE="int" LENGTH="10" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
