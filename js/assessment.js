@@ -375,11 +375,12 @@ window.ReadingAssessment = (function() {
                                 const scores = res.scores || res.passage_scores || {};
                                 const wordAcc = Math.round((scores.word_accuracy || 0.0) * 100);
                                 const phoneAcc = Math.round((scores.phoneme_accuracy || 0.0) * 100);
+                                const calculatedMiscueCount = res.miscue_count !== undefined ? res.miscue_count : wordResults.filter(w => w.is_miscue || w.error_type === "Mispronunciation" || (w.accuracy_score !== undefined && w.accuracy_score < 60.0)).length;
 
                                 renderEvaluatedPassageHighlighting(config.passage || '', wordResults, asrServiceUrl, ttsVoice);
 
                                 let disfluencyNotice = res.disfluent_word_percentage > 0 ? ` | Disfluencies: ${res.repeated_words || 0}` : '';
-                                statusText.textContent = `Acoustic reading evaluated! Word Accuracy: ${wordAcc}% | Phoneme Acc: ${phoneAcc}% | ⚡ Speed: ${readingSpeedWPM} WPM (${readingTimeSeconds}s)${disfluencyNotice}. Complete questionnaire below and click [Submit Assessment].`;
+                                statusText.textContent = `Acoustic reading evaluated! Word Accuracy: ${wordAcc}% | Miscues: ${calculatedMiscueCount} | Phoneme Acc: ${phoneAcc}% | ⚡ Speed: ${readingSpeedWPM} WPM (${readingTimeSeconds}s)${disfluencyNotice}. Complete questionnaire below and click [Submit Assessment].`;
                             }
                         } catch(err) {
                             console.debug("WS message decode error:", err);
@@ -520,13 +521,19 @@ window.ReadingAssessment = (function() {
                 const wwwroot = config.wwwroot || window.location.origin;
                 const submitUrl = `${wwwroot}/mod/readingassessment/view.php?id=${config.cmid}&action=submit`;
 
-                const miscuesList = heldEvaluationData && heldEvaluationData.words ? heldEvaluationData.words.map(w => ({
-                    word: w.target_word,
-                    status: (w.status === "CORRECT_FLUENT" || w.mastery) ? "good" : (w.status === "ACCEPTABLE_REGIONAL" || w.status === "CORRECT_BUT_SEGMENTED" ? "improvement" : "miscue"),
-                    spoken: (w.detected_phonemes || []).join(" "),
-                    phoneme_score: w.phoneme_score,
-                    disfluency: w.disfluency
-                })) : (evalData.word_feedback || []);
+                const miscuesList = heldEvaluationData && heldEvaluationData.words ? heldEvaluationData.words.map(w => {
+                    const isGood = (!w.is_miscue && w.error_type === "None") ||
+                                   (w.accuracy_score !== undefined && w.accuracy_score >= 60.0) ||
+                                   w.status === "CORRECT_FLUENT" || w.mastery;
+                    const isImprovement = w.status === "ACCEPTABLE_REGIONAL" || w.status === "CORRECT_BUT_SEGMENTED";
+                    return {
+                        word: w.target_word || w.word,
+                        status: isGood ? "good" : (isImprovement ? "improvement" : "miscue"),
+                        spoken: (w.phoneme_results ? w.phoneme_results.map(p => p.phoneme).join(" ") : (w.detected_phonemes || []).join(" ")),
+                        phoneme_score: w.phoneme_score || w.accuracy_score,
+                        disfluency: w.disfluency
+                    };
+                }) : (evalData.word_feedback || []);
 
                 const params = new URLSearchParams({
                     transcript: liveTranscript,

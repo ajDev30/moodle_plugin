@@ -390,10 +390,17 @@ class AzureSession:
                         actual_idx = self._next_passage_idx + ref_idx
                         w_copy["passage_idx"] = actual_idx
                         max_matched_ref_idx = max(max_matched_ref_idx, ref_idx)
-                    if w_copy.get("error_type") == 'None':
-                        w_copy["error_type"] = "Insertion" if tag == 'insert' else "Mispronunciation"
+
+                    acc = float(w_copy.get("accuracy_score", 100.0) or 100.0)
+                    err = w_copy.get("error_type", "None")
+                    if err == "None" or acc >= 60.0:
+                        w_copy["is_miscue"] = False
+                        w_copy["miscue_type"] = "NONE"
+                    else:
+                        w_copy["is_miscue"] = True
                         w_copy["miscue_type"] = "INSERTION" if tag == 'insert' else "MISPRONUNCIATION"
-                    w_copy["is_miscue"] = True
+                        if err == "None":
+                            w_copy["error_type"] = "Insertion" if tag == 'insert' else "Mispronunciation"
                     final_words.append(w_copy)
 
             if tag == 'delete':
@@ -422,6 +429,8 @@ class AzureSession:
                         actual_idx = self._next_passage_idx + ref_idx
                         w_copy["passage_idx"] = actual_idx
                         max_matched_ref_idx = max(max_matched_ref_idx, ref_idx)
+                    w_copy["is_miscue"] = False
+                    w_copy["miscue_type"] = "NONE"
                     final_words.append(w_copy)
 
         if max_matched_ref_idx >= 0:
@@ -491,19 +500,12 @@ class AzureSession:
             )
 
     def _parse_word(self, azure_word) -> Optional[Dict[str, Any]]:
-        """Convert an Azure word result into our internal format."""
+        """Parse raw Azure Speech SDK WordResult object into dictionary."""
         try:
-            error_type  = azure_word.error_type
-            miscue_type = AZURE_ERROR_TYPE_MAP.get(error_type, "MISPRONUNCIATION")
-            accuracy    = float(azure_word.accuracy_score) if hasattr(azure_word, "accuracy_score") else 0.0
-            is_miscue   = miscue_type in ("OMISSION", "MISPRONUNCIATION", "SUBSTITUTION")
-
-            # Passage index tracking
-            if miscue_type == "INSERTION":
-                passage_idx = None
-            else:
-                passage_idx = self._next_passage_idx
-                self._next_passage_idx += 1
+            accuracy = float(azure_word.accuracy_score) if hasattr(azure_word, "accuracy_score") else 0.0
+            error_type = getattr(azure_word, "error_type", "None") or "None"
+            miscue_type = AZURE_ERROR_TYPE_MAP.get(error_type, "NONE")
+            is_miscue = error_type in ("Mispronunciation", "Omission") or accuracy < 60.0
 
             # Phoneme results
             phoneme_results = []
@@ -523,7 +525,7 @@ class AzureSession:
 
             return {
                 "word":               azure_word.word,
-                "passage_idx":        passage_idx,
+                "passage_idx":        None,
                 "miscue_type":        miscue_type,
                 "is_miscue":          is_miscue,
                 "pronunciation_score": round(accuracy / 100.0, 4),
@@ -550,15 +552,25 @@ class AzureSession:
             matcher = difflib.SequenceMatcher(None, ref_words, rec_word_texts)
             aligned_words = []
             for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-                if tag in ('insert', 'replace'):
+                if tag == 'replace':
+                    for idx_offset, w in enumerate(rec_words[j1:j2]):
+                        w_copy = dict(w)
+                        acc = float(w_copy.get("accuracy_score", 100.0) or 100.0)
+                        err = w_copy.get("error_type", "None")
+                        if err == "None" or acc >= 60.0:
+                            w_copy["is_miscue"] = False
+                            w_copy["miscue_type"] = "NONE"
+                        else:
+                            w_copy["is_miscue"] = True
+                            w_copy["miscue_type"] = "MISPRONUNCIATION"
+                        aligned_words.append(w_copy)
+                elif tag == 'insert':
                     for w in rec_words[j1:j2]:
                         w_copy = dict(w)
-                        if w_copy.get("error_type") == "None":
-                            w_copy["error_type"] = "Insertion"
-                            w_copy["miscue_type"] = "INSERTION"
-                            w_copy["is_miscue"] = False
+                        w_copy["is_miscue"] = True
+                        w_copy["miscue_type"] = "INSERTION"
                         aligned_words.append(w_copy)
-                if tag in ('delete', 'replace'):
+                elif tag == 'delete':
                     for ref_w in ref_words[i1:i2]:
                         aligned_words.append({
                             "word": ref_w,
@@ -572,8 +584,12 @@ class AzureSession:
                             "word_start": None,
                             "word_end": None,
                         })
-                if tag == 'equal':
-                    aligned_words.extend(rec_words[j1:j2])
+                elif tag == 'equal':
+                    for w in rec_words[j1:j2]:
+                        w_copy = dict(w)
+                        w_copy["is_miscue"] = False
+                        w_copy["miscue_type"] = "NONE"
+                        aligned_words.append(w_copy)
             words = aligned_words
         else:
             words = rec_words
