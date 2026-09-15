@@ -1029,12 +1029,6 @@ window.InstructionalReader = (function() {
                         if (!currentLine) break;
                         lineTokens = currentLine.split(/\s+/);
                     }
-                } else if (remainingSpoken.length === 1 && cleanWord(remainingSpoken[0]).length >= 3 && !matchWholeWord(activeClean, cleanWord(remainingSpoken[0]))) {
-                    // Single spoken token attempted at active position but mispronounced: trigger Coach Mode
-                    markCurrentWordMiscue();
-                    renderCurrentLineUI();
-                    enterWordIsolationMode(activeToken, voice, asrServiceUrl);
-                    break;
                 } else {
                     break;
                 }
@@ -1091,7 +1085,7 @@ window.InstructionalReader = (function() {
             if (!nextWord || isIsolatedMode) return;
             interventionTimer = setTimeout(() => {
                 enterWordIsolationMode(nextWord, voice, asrServiceUrl);
-            }, 7000); // 7.0s hesitation timeout (gives reader space to decode without interruption)
+            }, 15000); // 15.0s hesitation timeout allowance
         }
 
         async function startWebRTCEngine() {
@@ -1128,36 +1122,61 @@ window.InstructionalReader = (function() {
                         }
                     });
 
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
                     if (audioContext.state === 'suspended') {
                         await audioContext.resume();
                     }
                     const source = audioContext.createMediaStreamSource(microphoneStream);
-                    processorNode = audioContext.createScriptProcessor(2048, 1, 1);
 
-                    const inputSampleRate = audioContext.sampleRate;
-                    const targetSampleRate = 16000;
-
-                    processorNode.onaudioprocess = (e) => {
-                        if (!isRecording || isAudioPlaying || !ws || ws.readyState !== WebSocket.OPEN) return;
-                        const inputData = e.inputBuffer.getChannelData(0);
-
-                        let resampled;
-                        if (inputSampleRate === targetSampleRate) {
-                            resampled = inputData;
-                        } else {
-                            const ratio = inputSampleRate / targetSampleRate;
-                            const newLength = Math.round(inputData.length / ratio);
-                            resampled = new Float32Array(newLength);
-                            for (let i = 0; i < newLength; i++) {
-                                resampled[i] = inputData[Math.min(Math.round(i * ratio), inputData.length - 1)];
+                    // Dedicated AudioWorkletProcessor running on real-time audio thread (decoupled from main UI thread)
+                    const pcmWorkletCode = `
+                        class PcmProcessor extends AudioWorkletProcessor {
+                            process(inputs, outputs, parameters) {
+                                const input = inputs[0];
+                                if (input && input.length > 0) {
+                                    const float32Data = input[0];
+                                    const pcm16 = new Int16Array(float32Data.length);
+                                    for (let i = 0; i < float32Data.length; i++) {
+                                        const s = Math.max(-1, Math.min(1, float32Data[i]));
+                                        pcm16[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+                                    }
+                                    this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+                                }
+                                return true;
                             }
                         }
-                        ws.send(resampled.buffer);
-                    };
+                        registerProcessor('pcm-processor', PcmProcessor);
+                    `;
 
-                    source.connect(processorNode);
-                    processorNode.connect(audioContext.destination);
+                    try {
+                        const blob = new Blob([pcmWorkletCode], { type: 'application/javascript' });
+                        const workletUrl = URL.createObjectURL(blob);
+                        await audioContext.audioWorklet.addModule(workletUrl);
+
+                        processorNode = new AudioWorkletNode(audioContext, 'pcm-processor');
+                        processorNode.port.onmessage = (e) => {
+                            if (!isRecording || isAudioPlaying || !ws || ws.readyState !== WebSocket.OPEN) return;
+                            ws.send(e.data);
+                        };
+
+                        source.connect(processorNode);
+                        processorNode.connect(audioContext.destination);
+                    } catch (workletErr) {
+                        console.warn("AudioWorklet fallback to ScriptProcessor:", workletErr);
+                        processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+                        processorNode.onaudioprocess = (e) => {
+                            if (!isRecording || isAudioPlaying || !ws || ws.readyState !== WebSocket.OPEN) return;
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            const pcm16 = new Int16Array(inputData.length);
+                            for (let i = 0; i < inputData.length; i++) {
+                                const s = Math.max(-1, Math.min(1, inputData[i]));
+                                pcm16[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+                            }
+                            ws.send(pcm16.buffer);
+                        };
+                        source.connect(processorNode);
+                        processorNode.connect(audioContext.destination);
+                    }
 
                     updateLiveStatus(`🎙️ Listening (${activeEngineName})... Reading Line ${currentLineIndex + 1} of ${lines.length}.`);
                 };

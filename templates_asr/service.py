@@ -328,17 +328,18 @@ class AzureSession:
         logger.info(f"session={self.session_id} event=azure_recognition_started region={self.azure_region}")
 
     def push_audio(self, audio_bytes: bytes) -> None:
-        """Feed raw audio bytes into the Azure push stream (converting Float32 to Int16 if needed)."""
+        """Feed raw audio bytes into the Azure push stream (handling both Int16 PCM and Float32 PCM)."""
         if not self._push_stream or self.state != "recognizing":
             return
         try:
-            # Check if browser sent Float32Array PCM (byte length divisible by 4)
             if len(audio_bytes) > 0 and len(audio_bytes) % 4 == 0:
                 float_samples = np.frombuffer(audio_bytes, dtype=np.float32)
-                int16_samples = (np.clip(float_samples, -1.0, 1.0) * 32767.0).astype(np.int16)
-                self._push_stream.write(int16_samples.tobytes())
-            else:
-                self._push_stream.write(audio_bytes)
+                # Only convert if sample values fall in standard Float32 audio range [-1.0, 1.0]
+                if len(float_samples) > 0 and np.max(np.abs(float_samples)) <= 1.0:
+                    int16_samples = (np.clip(float_samples, -1.0, 1.0) * 32767.0).astype(np.int16)
+                    self._push_stream.write(int16_samples.tobytes())
+                    return
+            self._push_stream.write(audio_bytes)
         except Exception as err:
             logger.warning(f"session={self.session_id} push_audio error: {err}")
 
