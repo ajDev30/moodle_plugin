@@ -1,223 +1,66 @@
 window.ReadingAssessment = (function() {
-    let pc = null;
-    let dataChannel = null;
+    let ws = null;
+    let audioContext = null;
+    let processorNode = null;
     let microphoneStream = null;
-    let speechRecognition = null;
     let isRecording = false;
     let liveTranscript = "";
     let finalTranscript = "";
     let heldEvaluationData = null;
     let retryCount = 0;
-    let asrEngineUsed = "openai"; // 'openai' or 'browser'
+    let asrEngineUsed = "azure";
+    let readingStartTime = null;
+    let wordAudioMap = {};
+    let currentAudio = null;
 
-    const ASR_SERVICE_URL = "http://localhost:8000";
+    function getWsUrl(asrServiceUrl) {
+        let url = asrServiceUrl || "http://localhost:8010";
+        if (url.startsWith("http://")) {
+            url = "ws://" + url.substring(7);
+        } else if (url.startsWith("https://")) {
+            url = "wss://" + url.substring(8);
+        } else if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+            url = "ws://" + url;
+        }
+        return url.replace(/\/+$/, "") + "/ws/stream";
+    }
 
-    // Jaro-Winkler string distance
-    function jaroWinkler(s1, s2) {
-        if (s1 === s2) return 1.0;
-        let l1 = s1.length, l2 = s2.length;
-        if (l1 === 0 || l2 === 0) return 0.0;
-        let matchDistance = Math.floor(Math.max(l1, l2) / 2) - 1;
-        let s1Matches = new Array(l1).fill(false);
-        let s2Matches = new Array(l2).fill(false);
-        let matches = 0, transpositions = 0;
+    function playWordAudio(word, asrServiceUrl, voice) {
+        const clean = word.replace(/[^\w]/g, '').toLowerCase();
+        if (!clean) return;
 
-        for (let i = 0; i < l1; i++) {
-            let start = Math.max(0, i - matchDistance);
-            let end = Math.min(i + matchDistance + 1, l2);
-            for (let j = start; j < end; j++) {
-                if (s2Matches[j] || s1[i] !== s2[j]) continue;
-                s1Matches[i] = true;
-                s2Matches[j] = true;
-                matches++;
-                break;
+        if (currentAudio) {
+            try { currentAudio.pause(); currentAudio.currentTime = 0; } catch(e) {}
+        }
+
+        if (wordAudioMap[clean]) {
+            currentAudio = new Audio(wordAudioMap[clean]);
+            currentAudio.play().catch(() => {});
+            return;
+        }
+
+        const baseUrl = asrServiceUrl || "http://localhost:8010";
+        fetch(`${baseUrl}/tts_words`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ words: [clean], voice: voice || "en-US-JennyNeural" })
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (d && d.audio_map && d.audio_map[clean]) {
+                wordAudioMap[clean] = d.audio_map[clean];
+                currentAudio = new Audio(wordAudioMap[clean]);
+                currentAudio.play().catch(() => {});
             }
-        }
-        if (matches === 0) return 0.0;
-        let k = 0;
-        for (let i = 0; i < l1; i++) {
-            if (!s1Matches[i]) continue;
-            while (!s2Matches[k]) k++;
-            if (s1[i] !== s2[k]) transpositions++;
-            k++;
-        }
-        let sim = (matches / l1 + matches / l2 + (matches - transpositions / 2) / matches) / 3.0;
-        let p = 0.1, prefix = 0;
-        for (let i = 0; i < Math.min(4, Math.min(l1, l2)); i++) {
-            if (s1[i] === s2[i]) prefix++;
-            else break;
-        }
-        return sim + prefix * p * (1 - sim);
+        })
+        .catch(e => console.warn("TTS audio fetch error:", e));
     }
 
-    // Metaphone algorithm: reduces words to consonant-based phonetic roots
-    function metaphone(word) {
-        if (!word) return "";
-        let str = word.toUpperCase().replace(/[^A-Z]/g, "");
-        if (!str) return "";
-
-        // Drop initial silent letters
-        if (/^(KN|GN|PN|AE|WR)/.test(str)) {
-            str = str.substring(1);
-        } else if (/^X/.test(str)) {
-            str = "S" + str.substring(1);
-        } else if (/^WH/.test(str)) {
-            str = "W" + str.substring(2);
-        }
-
-        let meta = "";
-        let len = str.length;
-
-        for (let i = 0; i < len; i++) {
-            let c = str[i];
-            let next = (i < len - 1) ? str[i + 1] : "";
-            let prev = (i > 0) ? str[i - 1] : "";
-
-            if (c === "B") {
-                if (prev === "M" && i === len - 1) continue;
-                meta += "B";
-            } else if (c === "C") {
-                if (next === "H") {
-                    meta += "X";
-                    i++;
-                } else if (next === "I" || next === "E" || next === "Y") {
-                    meta += "S";
-                } else {
-                    meta += "K";
-                }
-            } else if (c === "D") {
-                if (next === "G" && (i + 2 < len) && (str[i + 2] === "E" || str[i + 2] === "I" || str[i + 2] === "Y")) {
-                    meta += "J";
-                    i += 2;
-                } else {
-                    meta += "T";
-                }
-            } else if (c === "G") {
-                if (next === "H" && i === len - 2) continue;
-                if (next === "N" && i === len - 2) continue;
-                if (next === "I" || next === "E" || next === "Y") {
-                    meta += "J";
-                } else {
-                    meta += "K";
-                }
-            } else if (c === "H") {
-                if (/[AEIOU]/.test(next) && (!/[CSPTG]/.test(prev))) {
-                    meta += "H";
-                }
-            } else if (c === "F" || c === "J" || c === "L" || c === "M" || c === "N" || c === "R") {
-                meta += c;
-            } else if (c === "K") {
-                if (prev !== "C") meta += "K";
-            } else if (c === "P") {
-                if (next === "H") {
-                    meta += "F";
-                    i++;
-                } else {
-                    meta += "P";
-                }
-            } else if (c === "Q") {
-                meta += "K";
-            } else if (c === "S") {
-                if (next === "H") {
-                    meta += "X";
-                    i++;
-                } else {
-                    meta += "S";
-                }
-            } else if (c === "T") {
-                if (next === "H") {
-                    meta += "0";
-                    i++;
-                } else if (next === "I" && (i + 2 < len) && (str[i + 2] === "O" || str[i + 2] === "A")) {
-                    meta += "X";
-                } else {
-                    meta += "T";
-                }
-            } else if (c === "V") {
-                meta += "F";
-            } else if (c === "W" || c === "Y") {
-                if (/[AEIOU]/.test(next)) meta += c;
-            } else if (c === "X") {
-                meta += "KS";
-            } else if (c === "Z") {
-                meta += "S";
-            } else if (i === 0 && /[AEIOU]/.test(c)) {
-                meta += c;
-            }
-        }
-        return meta;
-    }
-
-    // Hybrid Jaro-Winkler (60%) + Metaphone (40%) Similarity
-    function computePhoneticSimilarity(w1, w2) {
-        if (!w1 || !w2) return 0.0;
-        if (w1 === w2) return 1.0;
-
-        let strSim = jaroWinkler(w1, w2);
-        let m1 = metaphone(w1);
-        let m2 = metaphone(w2);
-
-        if (m1 && m2) {
-            let metaSim = (m1 === m2) ? 1.0 : jaroWinkler(m1, m2);
-            return (strSim * 0.6) + (metaSim * 0.4);
-        }
-        return strSim;
-    }
-
-    function updateLivePassageHighlighting(passageText, currentTranscript) {
+    function renderEvaluatedPassageHighlighting(passageText, wordFeedback, asrServiceUrl, voice) {
         const passageBox = document.getElementById("ra-passage-text");
         if (!passageBox || !passageText) return;
 
-        const origPassageTokens = passageText.split(/(\s+)/);
-        const cleanSpokenWords = currentTranscript.replace(/[^\w\s]/g, '').toLowerCase().split(/\s+/).filter(Boolean);
-
-        let spokenIdx = 0;
-        let html = "";
-
-        for (let i = 0; i < origPassageTokens.length; i++) {
-            const token = origPassageTokens[i];
-            if (/^\s+$/.test(token)) {
-                html += token;
-                continue;
-            }
-
-            const cleanWord = token.replace(/[^\w\s]/g, '').toLowerCase();
-            let bestSim = 0.0;
-            let bestIdx = -1;
-
-            let windowEnd = Math.min(spokenIdx + 4, cleanSpokenWords.length);
-            for (let s = spokenIdx; s < windowEnd; s++) {
-                let sim = computePhoneticSimilarity(cleanWord, cleanSpokenWords[s]);
-                if (sim > bestSim) {
-                    bestSim = sim;
-                    bestIdx = s;
-                }
-            }
-
-            if (bestIdx !== -1 && bestSim >= 0.75) {
-                spokenIdx = bestIdx + 1;
-                if (bestSim >= 0.90) {
-                    html += `<span class="word-good">${token}</span>`;
-                } else {
-                    html += `<span class="word-improvement">${token}</span>`;
-                }
-            } else {
-                if (spokenIdx < cleanSpokenWords.length) {
-                    html += `<span class="word-miscue">${token}</span>`;
-                } else {
-                    html += token; // Not read yet
-                }
-            }
-        }
-
-        passageBox.innerHTML = html;
-    }
-
-    function renderEvaluatedPassageHighlighting(passageText, wordFeedback) {
-        const passageBox = document.getElementById("ra-passage-text");
-        if (!passageBox || !passageText) return;
-
-        if (!wordFeedback || !Array.isArray(wordFeedback)) {
+        if (!wordFeedback || !Array.isArray(wordFeedback) || wordFeedback.length === 0) {
             passageBox.textContent = passageText;
             return;
         }
@@ -236,14 +79,85 @@ window.ReadingAssessment = (function() {
             if (fbIndex < wordFeedback.length) {
                 const fb = wordFeedback[fbIndex];
                 const st = fb.status || 'miscue';
-                const spokenStr = fb.spoken ? ` (Spoken: ${fb.spoken})` : '';
+                const cleanW = token.replace(/[^\w]/g, '');
+                const spokenStr = fb.spoken ? ` (Heard: ${fb.spoken})` : '';
+                const disfluency = fb.disfluency && fb.disfluency.detected ? ` [${fb.disfluency.type}]` : '';
 
-                if (st === 'good') {
-                    html += `<span class="word-good" title="Spoken cleanly">${token}</span>`;
-                } else if (st === 'improvement') {
-                    html += `<span class="word-improvement" title="${spokenStr}">${token}</span>`;
+                const isGood = (fb.error_type === "None" && !fb.is_miscue) ||
+                               (fb.accuracy_score !== undefined && fb.accuracy_score >= 60.0) ||
+                               st === "CORRECT_FLUENT" || st === "good";
+
+                let cls = "word-miscue";
+                if (isGood) {
+                    cls = "word-good";
+                } else if (st === "ACCEPTABLE_REGIONAL" || st === "CORRECT_BUT_SEGMENTED" || st === "improvement") {
+                    cls = "word-improvement";
+                } else if (st === "REPEATED_WORD" || st === "REPEATED_ONSET" || st === "REPEATED_SYLLABLE" || st === "RESTART" || st === "BLOCK_OR_PROLONGATION") {
+                    cls = "word-improvement";
+                }
+
+                html += `<span class="${cls} ra-clickable-word" data-word="${cleanW}" title="${st}${spokenStr}${disfluency} (Click to hear standard pronunciation)">${token}</span>`;
+                fbIndex++;
+            } else {
+                html += token;
+            }
+        }
+
+        passageBox.innerHTML = html;
+
+        // Attach click listeners for instant OpenAI TTS audio playback
+        passageBox.querySelectorAll(".ra-clickable-word").forEach(el => {
+            el.addEventListener("click", () => {
+                const w = el.getAttribute("data-word");
+                playWordAudio(w, asrServiceUrl, voice);
+            });
+        });
+    }
+
+    function updateLivePassageHighlighting(passageText, wordsResult) {
+        const passageBox = document.getElementById("ra-passage-text");
+        if (!passageBox || !passageText) return;
+
+        if (!wordsResult || !Array.isArray(wordsResult)) {
+            return;
+        }
+
+        const origTokens = passageText.split(/(\s+)/);
+        let fbIndex = 0;
+        let html = "";
+
+        for (let i = 0; i < origTokens.length; i++) {
+            const token = origTokens[i];
+            if (/^\s+$/.test(token)) {
+                html += token;
+                continue;
+            }
+
+            if (fbIndex < wordsResult.length) {
+                const wRes = wordsResult[fbIndex];
+                const st = wRes.status;
+                const isGood = (wRes.error_type === "None" && !wRes.is_miscue) ||
+                               (wRes.accuracy_score !== undefined && wRes.accuracy_score >= 60.0) ||
+                               st === "CORRECT_FLUENT" || wRes.mastery;
+                const isMiscue = wRes.is_miscue ||
+                                 wRes.error_type === "Mispronunciation" ||
+                                 (wRes.accuracy_score !== undefined && wRes.accuracy_score < 60.0);
+
+                let cls = "";
+                if (isGood) {
+                    cls = "word-good";
+                } else if (isMiscue) {
+                    cls = "word-miscue";
+                } else if (st === "ACCEPTABLE_REGIONAL" || st === "CORRECT_BUT_SEGMENTED") {
+                    cls = "word-improvement";
+                } else if (st && st !== "OMITTED" && st !== "INSUFFICIENT_AUDIO") {
+                    cls = "word-improvement";
+                }
+
+                if (cls) {
+                    html += `<span class="${cls}">${token}</span>`;
                 } else {
-                    html += `<span class="word-miscue" title="${spokenStr}">${token}</span>`;
+                    html += token;
                 }
                 fbIndex++;
             } else {
@@ -254,25 +168,27 @@ window.ReadingAssessment = (function() {
         passageBox.innerHTML = html;
     }
 
-    // Immediately stop microphone & close WebRTC connection to conserve API credits
     function stopRecordingMedia() {
+        if (processorNode) {
+            try { processorNode.disconnect(); } catch(e) {}
+            processorNode = null;
+        }
+        if (audioContext) {
+            try { audioContext.close(); } catch(e) {}
+            audioContext = null;
+        }
         if (microphoneStream) {
             microphoneStream.getTracks().forEach(t => {
                 try { t.stop(); } catch(e) {}
             });
             microphoneStream = null;
         }
-        if (dataChannel) {
-            try { dataChannel.close(); } catch(e) {}
-            dataChannel = null;
-        }
-        if (pc) {
-            try { pc.close(); } catch(e) {}
-            pc = null;
-        }
-        if (speechRecognition) {
-            try { speechRecognition.stop(); } catch(e) {}
-            speechRecognition = null;
+        if (ws) {
+            try {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "stop" }));
+                }
+            } catch(e) {}
         }
     }
 
@@ -290,10 +206,10 @@ window.ReadingAssessment = (function() {
         retryBtn.disabled = true;
 
         const questions = config.questions || [];
-        const asrServiceUrl = config.asr_service_url || ASR_SERVICE_URL;
-        const attemptsExhausted = (config.attempts_exhausted === true);
+        const asrServiceUrl = config.asr_service_url || "http://localhost:8010";
+        const wsUrl = getWsUrl(asrServiceUrl);
+        const ttsVoice = config.tts_voice || "alloy";
 
-        // Clear unanswered highlights when student picks an answer
         questions.forEach((q, idx) => {
             const radioOptions = document.querySelectorAll(`input[name="q_${idx}"]`);
             radioOptions.forEach(opt => {
@@ -304,254 +220,210 @@ window.ReadingAssessment = (function() {
             });
         });
 
-        const validateAllQuestionsAnswered = () => {
-            let allAnswered = true;
-            let firstUnansweredEl = null;
-
-            questions.forEach((q, idx) => {
-                const selected = document.querySelector(`input[name="q_${idx}"]:checked`);
-                const itemBox = document.getElementById(`ra-qitem-${idx}`);
-                if (!selected) {
-                    allAnswered = false;
-                    if (itemBox) {
-                        itemBox.classList.add("ra-question-unanswered");
-                        if (!firstUnansweredEl) firstUnansweredEl = itemBox;
-                    }
-                } else {
-                    if (itemBox) itemBox.classList.remove("ra-question-unanswered");
+        // Preload word pronunciations in background for instant playback
+        if (config.passage) {
+            const wordsList = config.passage.split(/\s+/).map(w => w.replace(/[^\w]/g, '').toLowerCase()).filter(Boolean);
+            fetch(`${asrServiceUrl}/tts_words`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ words: wordsList.slice(0, 40), voice: ttsVoice })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d && d.audio_map) {
+                    Object.assign(wordAudioMap, d.audio_map);
                 }
-            });
+            })
+            .catch(() => {});
+        }
 
-            if (!allAnswered && firstUnansweredEl) {
-                firstUnansweredEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-
-            return allAnswered;
-        };
-
-        // --- Start / Done Button Toggle ---
         startBtn.addEventListener("click", async () => {
             if (!isRecording) {
-                // START RECORDING
                 try {
                     startBtn.disabled = true;
+                    statusText.textContent = "Connecting to Streaming ASR & Acoustic Assessment...";
+                    readingStartTime = Date.now();
 
-                    // Practice Mode only if max attempts reached
-                    if (attemptsExhausted) {
-                        asrEngineUsed = "browser";
-                        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-                        if (!SpeechRecognitionClass) {
-                            throw new Error("Web Speech API not supported in this browser. Please use Chrome/Edge.");
-                        }
+                    ws = new WebSocket(wsUrl);
+                    ws.binaryType = "arraybuffer";
 
-                        speechRecognition = new SpeechRecognitionClass();
-                        speechRecognition.continuous = true;
-                        speechRecognition.interimResults = true;
-                        speechRecognition.lang = 'en-US';
-
-                        speechRecognition.onresult = (event) => {
-                            let interimStr = '';
-                            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                                if (event.results[i].isFinal) {
-                                    finalTranscript += event.results[i][0].transcript + ' ';
-                                } else {
-                                    interimStr += event.results[i][0].transcript;
-                                }
-                            }
-                            const full = finalTranscript + interimStr;
-                            if (transcriptDisplay) transcriptDisplay.textContent = full;
-                            updateLivePassageHighlighting(config.passage || '', full);
-                        };
-
-                        speechRecognition.start();
-                        isRecording = true;
-                        statusText.textContent = "Practice Mode Active (Browser Speech Engine) — Speak now. Zero OpenAI API credits used.";
-                        vadIndicator.classList.add("ra-vad-active");
-
-                        startBtn.innerHTML = "<span>✓</span> Done";
-                        startBtn.className = "ra-btn ra-btn-done";
-                        startBtn.disabled = false;
-                        retryBtn.disabled = false;
-                        return;
-                    }
-
-                    // Official Allowed Attempt -> Use OpenAI Realtime API
-                    statusText.textContent = "Connecting to ASR service...";
-                    let clientSecret = null;
-                    try {
-                        const sessResp = await fetch(`${asrServiceUrl}/session`, { method: "POST" });
-                        const sessData = await sessResp.json().catch(() => ({}));
-                        if (sessResp.ok && sessData.client_secret) {
-                            clientSecret = sessData.client_secret;
-                        }
-                    } catch (e) {
-                        console.warn("Could not reach Python ASR service /session endpoint:", e);
-                    }
-
-                    if (clientSecret) {
-                        // --- WebRTC OpenAI Realtime Engine ---
-                        asrEngineUsed = "openai";
-                        pc = new RTCPeerConnection();
-                        dataChannel = pc.createDataChannel("oai-events");
-
-                        dataChannel.onopen = () => {
-                            isRecording = true;
-                            statusText.textContent = "Recording active (Official AI Assessment) — speak now. Click [Done] when finished.";
-                            vadIndicator.classList.add("ra-vad-active");
-                            
-                            startBtn.innerHTML = "<span>✓</span> Done";
-                            startBtn.className = "ra-btn ra-btn-done";
-                            startBtn.disabled = false;
-                            retryBtn.disabled = false;
-
-                            dataChannel.send(JSON.stringify({
-                                type: "session.update",
-                                session: {
-                                    type: "transcription",
-                                    audio: {
-                                        input: {
-                                            transcription: { model: "gpt-live-transcribe", delay: "minimal" },
-                                            turn_detection: null
-                                        }
-                                    }
-                                }
-                            }));
-                        };
-
-                        dataChannel.onmessage = (event) => {
-                            const msg = JSON.parse(event.data);
-                            if (msg.type === "conversation.item.input_audio_transcription.delta") {
-                                liveTranscript += (msg.delta || "");
-                                const full = finalTranscript + " " + liveTranscript;
-                                if (transcriptDisplay) transcriptDisplay.textContent = full;
-                                updateLivePassageHighlighting(config.passage || '', full);
-                            } else if (msg.type === "conversation.item.input_audio_transcription.completed") {
-                                finalTranscript += (msg.transcript || "") + " ";
-                                liveTranscript = "";
-                                const full = finalTranscript;
-                                if (transcriptDisplay) transcriptDisplay.textContent = full;
-                                updateLivePassageHighlighting(config.passage || '', full);
-                            }
-                        };
+                    ws.onopen = async () => {
+                        ws.send(JSON.stringify({
+                            type: "start",
+                            target: config.passage || "",
+                            attempt_id: (config.attemptcount || 0) + 1,
+                            moodle_user_id: config.userid,
+                            moodle_attempt_id: config.cmid
+                        }));
 
                         microphoneStream = await navigator.mediaDevices.getUserMedia({
-                            audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
-                        });
-
-                        microphoneStream.getTracks().forEach(track => pc.addTrack(track, microphoneStream));
-
-                        const offer = await pc.createOffer();
-                        await pc.setLocalDescription(offer);
-
-                        const sdpResp = await fetch("https://api.openai.com/v1/realtime/calls", {
-                            method: "POST",
-                            body: offer.sdp,
-                            headers: {
-                                "Authorization": `Bearer ${clientSecret}`,
-                                "Content-Type": "application/sdp"
+                            audio: {
+                                channelCount: 1,
+                                echoCancellation: true,
+                                noiseSuppression: true,
+                                autoGainControl: true,
                             }
                         });
 
-                        if (!sdpResp.ok) throw new Error(await sdpResp.text());
-                        const answerSdp = await sdpResp.text();
-                        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-                    } else {
-                        // Fallback to Web Speech API
-                        asrEngineUsed = "browser";
-                        const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-                        if (!SpeechRecognitionClass) {
-                            throw new Error("OpenAI API key missing and Web Speech API not supported in this browser.");
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                        if (audioContext.state === 'suspended') {
+                            await audioContext.resume();
                         }
+                        const source = audioContext.createMediaStreamSource(microphoneStream);
 
-                        speechRecognition = new SpeechRecognitionClass();
-                        speechRecognition.continuous = true;
-                        speechRecognition.interimResults = true;
-                        speechRecognition.lang = 'en-US';
-
-                        speechRecognition.onresult = (event) => {
-                            let interimStr = '';
-                            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                                if (event.results[i].isFinal) {
-                                    finalTranscript += event.results[i][0].transcript + ' ';
-                                } else {
-                                    interimStr += event.results[i][0].transcript;
+                        const pcmWorkletCode = `
+                            class PcmProcessor extends AudioWorkletProcessor {
+                                process(inputs, outputs, parameters) {
+                                    const input = inputs[0];
+                                    if (input && input.length > 0) {
+                                        const float32Data = input[0];
+                                        const pcm16 = new Int16Array(float32Data.length);
+                                        for (let i = 0; i < float32Data.length; i++) {
+                                            const s = Math.max(-1, Math.min(1, float32Data[i]));
+                                            pcm16[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+                                        }
+                                        this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+                                    }
+                                    return true;
                                 }
                             }
-                            const full = finalTranscript + interimStr;
-                            if (transcriptDisplay) transcriptDisplay.textContent = full;
-                            updateLivePassageHighlighting(config.passage || '', full);
-                        };
+                            registerProcessor('pcm-processor', PcmProcessor);
+                        `;
 
-                        speechRecognition.start();
+                        try {
+                            const blob = new Blob([pcmWorkletCode], { type: 'application/javascript' });
+                            const workletUrl = URL.createObjectURL(blob);
+                            await audioContext.audioWorklet.addModule(workletUrl);
+
+                            processorNode = new AudioWorkletNode(audioContext, 'pcm-processor');
+                            processorNode.port.onmessage = (e) => {
+                                if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
+                                ws.send(e.data);
+                            };
+
+                            source.connect(processorNode);
+                            processorNode.connect(audioContext.destination);
+                        } catch (workletErr) {
+                            console.warn("AudioWorklet fallback to ScriptProcessor in assessment.js:", workletErr);
+                            processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+                            processorNode.onaudioprocess = (e) => {
+                                if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
+                                const inputData = e.inputBuffer.getChannelData(0);
+                                const pcm16 = new Int16Array(inputData.length);
+                                for (let i = 0; i < inputData.length; i++) {
+                                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                                    pcm16[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+                                }
+                                ws.send(pcm16.buffer);
+                            };
+                            source.connect(processorNode);
+                            processorNode.connect(audioContext.destination);
+                        }
+
                         isRecording = true;
-                        statusText.textContent = "Recording active (Browser Speech Engine) — speak now. Click [Done] when finished.";
+                        statusText.textContent = "🎙️ Real-time Acoustic Assessment Active — Read the passage aloud now. Click [Done] when finished.";
                         vadIndicator.classList.add("ra-vad-active");
 
                         startBtn.innerHTML = "<span>✓</span> Done";
                         startBtn.className = "ra-btn ra-btn-done";
                         startBtn.disabled = false;
                         retryBtn.disabled = false;
-                    }
+                    };
+
+                    ws.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            const msgType = data.type;
+
+                            if (msgType === "vad") {
+                                if (data.is_speech) {
+                                    vadIndicator.classList.add("ra-vad-active");
+                                } else {
+                                    vadIndicator.classList.remove("ra-vad-active");
+                                }
+                            } else if (msgType === "partial") {
+                                const res = data.result;
+                                if (res) {
+                                    if (res.detected && res.detected.raw) {
+                                        liveTranscript = res.detected.raw;
+                                        if (transcriptDisplay) transcriptDisplay.textContent = liveTranscript;
+                                    }
+                                    if (res.words) {
+                                        updateLivePassageHighlighting(config.passage || "", res.words);
+                                    }
+                                }
+                            } else if (msgType === "final") {
+                                const res = data.result;
+                                heldEvaluationData = res;
+                                isRecording = false;
+                                stopRecordingMedia();
+                                vadIndicator.classList.remove("ra-vad-active");
+
+                                startBtn.innerHTML = "<span>▶</span> Start";
+                                startBtn.className = "ra-btn ra-btn-start";
+                                startBtn.disabled = false;
+
+                                const readingTimeSeconds = readingStartTime ? Math.max(1, Math.round((Date.now() - readingStartTime) / 1000)) : 30;
+                                const wordsList = (config.passage || '').trim().split(/\s+/);
+                                const totalWords = wordsList.length;
+                                const readingSpeedWPM = Math.round(((totalWords / readingTimeSeconds) * 60) * 100) / 100;
+
+                                heldEvaluationData.reading_time = readingTimeSeconds;
+                                heldEvaluationData.reading_speed = readingSpeedWPM;
+
+                                const wordResults = res.words || [];
+                                const scores = res.scores || res.passage_scores || {};
+                                const wordAcc = Math.round((scores.word_accuracy || 0.0) * 100);
+                                const phoneAcc = Math.round((scores.phoneme_accuracy || 0.0) * 100);
+
+                                renderEvaluatedPassageHighlighting(config.passage || '', wordResults, asrServiceUrl, ttsVoice);
+
+                                let disfluencyNotice = res.disfluent_word_percentage > 0 ? ` | Disfluencies: ${res.repeated_words || 0}` : '';
+                                statusText.textContent = `Acoustic reading evaluated! Word Accuracy: ${wordAcc}% | Phoneme Acc: ${phoneAcc}% | ⚡ Speed: ${readingSpeedWPM} WPM (${readingTimeSeconds}s)${disfluencyNotice}. Complete questionnaire below and click [Submit Assessment].`;
+                            }
+                        } catch(err) {
+                            console.debug("WS message decode error:", err);
+                        }
+                    };
+
+                    ws.onerror = (err) => {
+                        console.error("Streaming WebSocket error:", err);
+                        statusText.textContent = "Streaming ASR connection error. Check if the Python service is running on port 8010.";
+                        startBtn.disabled = false;
+                    };
+
+                    ws.onclose = () => {
+                        if (isRecording) {
+                            stopRecordingMedia();
+                            isRecording = false;
+                            vadIndicator.classList.remove("ra-vad-active");
+                            startBtn.innerHTML = "<span>▶</span> Start";
+                            startBtn.className = "ra-btn ra-btn-start";
+                            startBtn.disabled = false;
+                        }
+                    };
 
                 } catch (err) {
-                    console.error("ASR Error:", err);
+                    console.error("ASR Start Error:", err);
                     statusText.textContent = "Error: " + err.message;
                     startBtn.disabled = false;
                 }
 
             } else {
-                // DONE CLICKED -> IMMEDIATELY STOP WEBRTC / MIC & EVALUATE READING SCORE
-                stopRecordingMedia();
-                isRecording = false;
-                vadIndicator.classList.remove("ra-vad-active");
-                statusText.textContent = "Evaluating reading fluency...";
-
-                startBtn.innerHTML = "<span>▶</span> Start";
-                startBtn.className = "ra-btn ra-btn-start";
-
-                // Reading Speed = (No. of words read ÷ Reading time in seconds) × 60
-                const readingTimeSeconds = readingStartTime ? Math.max(1, Math.round((Date.now() - readingStartTime) / 1000)) : 30;
-                const wordsList = (config.passage || '').trim().split(/\s+/);
-                const totalWords = wordsList.length;
-                const readingSpeedWPM = Math.round(((totalWords / readingTimeSeconds) * 60) * 100) / 100;
-
-                // Evaluate reading fluency with backend scoring service
-                try {
-                    const evalResp = await fetch(`${asrServiceUrl}/evaluate`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            passage: config.passage,
-                            transcript: finalTranscript + " " + liveTranscript,
-                            reading_time: readingTimeSeconds,
-                            reading_speed: readingSpeedWPM,
-                            answers: [],
-                            correct_answers: [],
-                            readingassessmentid: config.readingassessmentid,
-                            userid: config.userid
-                        })
-                    });
-
-                    const evalData = await evalResp.json();
-                    evalData.reading_time = readingTimeSeconds;
-                    evalData.reading_speed = readingSpeedWPM;
-                    heldEvaluationData = evalData;
-
-                    // Render evaluated 3-tier word highlighting
-                    renderEvaluatedPassageHighlighting(config.passage || '', evalData.word_feedback);
-
-                    let engineNote = (asrEngineUsed === "browser") ? " [Practice Mode - Browser Engine]" : " [Official AI Attempt]";
-                    statusText.textContent = `Reading evaluated! Accuracy: ${evalData.accuracy_score}% | ⚡ Speed: ${readingSpeedWPM} WPM (${readingTimeSeconds}s)${engineNote}. Complete questionnaire below and click [Submit Assessment].`;
-
-                } catch (err) {
-                    console.error("Fluency evaluation error:", err);
-                    statusText.textContent = "Fluency evaluation error: " + err.message;
+                // Done clicked
+                statusText.textContent = "Finalizing acoustic assessment...";
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "stop" }));
+                } else {
+                    stopRecordingMedia();
+                    isRecording = false;
+                    vadIndicator.classList.remove("ra-vad-active");
+                    startBtn.innerHTML = "<span>▶</span> Start";
+                    startBtn.className = "ra-btn ra-btn-start";
                 }
             }
         });
 
-        // --- Retry Button ---
         retryBtn.addEventListener("click", () => {
             stopRecordingMedia();
             isRecording = false;
@@ -573,9 +445,8 @@ window.ReadingAssessment = (function() {
             statusText.textContent = `Reading reset (Retry #${retryCount}). Click [Start] to re-read.`;
         });
 
-        // --- Submit Assessment Button ---
         submitBtn.addEventListener("click", async () => {
-            if (!heldEvaluationData && (finalTranscript.trim().length === 0 && liveTranscript.trim().length === 0)) {
+            if (!heldEvaluationData && liveTranscript.trim().length === 0) {
                 statusText.textContent = "⚠️ Please read the passage and click [Done] before submitting.";
                 startBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 return;
@@ -590,9 +461,8 @@ window.ReadingAssessment = (function() {
             }
 
             submitBtn.disabled = true;
-            statusText.textContent = "Submitting assessment...";
+            statusText.textContent = "Submitting assessment to Moodle Gradebook...";
 
-            const questions = config.questions || [];
             const studentAnswers = [];
             questions.forEach((q, idx) => {
                 const qtype = q.type || 'multichoice';
@@ -636,28 +506,38 @@ window.ReadingAssessment = (function() {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         passage: config.passage,
-                        transcript: finalTranscript + " " + liveTranscript,
+                        transcript: liveTranscript,
                         answers: studentAnswers,
                         correct_answers: questions.map(q => q.correct !== undefined ? q.correct : 0),
+                        reading_time: heldEvaluationData ? heldEvaluationData.reading_time : 30,
+                        reading_speed: heldEvaluationData ? heldEvaluationData.reading_speed : 0.0,
                         readingassessmentid: config.readingassessmentid,
                         userid: config.userid
                     })
                 });
 
                 const evalData = await evalResp.json();
-
                 const wwwroot = config.wwwroot || window.location.origin;
                 const submitUrl = `${wwwroot}/mod/readingassessment/view.php?id=${config.cmid}&action=submit`;
 
+                const miscuesList = heldEvaluationData && heldEvaluationData.words ? heldEvaluationData.words.map(w => ({
+                    word: w.target_word,
+                    status: (w.status === "CORRECT_FLUENT" || w.mastery) ? "good" : (w.status === "ACCEPTABLE_REGIONAL" || w.status === "CORRECT_BUT_SEGMENTED" ? "improvement" : "miscue"),
+                    spoken: (w.detected_phonemes || []).join(" "),
+                    phoneme_score: w.phoneme_score,
+                    disfluency: w.disfluency
+                })) : (evalData.word_feedback || []);
+
                 const params = new URLSearchParams({
-                    transcript: finalTranscript + " " + liveTranscript,
+                    transcript: liveTranscript,
                     accuracy_score: evalData.accuracy_score,
                     comprehension_score: evalData.comprehension_score || 100.0,
                     final_grade: evalData.final_grade || evalData.accuracy_score,
-                    reading_time: evalData.reading_time || (heldEvaluationData ? heldEvaluationData.reading_time : 0),
-                    reading_speed: evalData.reading_speed || (heldEvaluationData ? heldEvaluationData.reading_speed : 0.0),
-                    miscues_json: JSON.stringify(evalData.word_feedback || []),
+                    reading_time: evalData.reading_time || 0,
+                    reading_speed: evalData.reading_speed || 0.0,
+                    miscues_json: JSON.stringify(miscuesList),
                     answers_json: JSON.stringify(studentAnswers),
+                    azure_speech_json: JSON.stringify(heldEvaluationData || evalData || {}),
                     asr_engine: asrEngineUsed,
                     sesskey: config.sesskey || ''
                 });
@@ -668,7 +548,7 @@ window.ReadingAssessment = (function() {
                     body: params
                 });
 
-                statusText.textContent = "Assessment submitted successfully! Reloading page to display results...";
+                statusText.textContent = "Assessment submitted successfully! Reloading results...";
                 setTimeout(() => window.location.reload(), 1200);
 
             } catch (err) {

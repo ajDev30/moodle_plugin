@@ -25,9 +25,10 @@ window.NonReaderStudio = (function() {
     let audioCooldownTimer = null;
     let microphoneStream = null;
 
-    // Continuous Streaming Audio & WebRTC State
-    let pc = null;
-    let dc = null;
+    // Continuous Streaming Audio & WebSocket State
+    let ws = null;
+    let audioContext = null;
+    let processorNode = null;
     let isStreamingActive = false;
     let isSpeechRecognitionActive = false;
     let speechRecognizer = null;
@@ -37,7 +38,7 @@ window.NonReaderStudio = (function() {
     let successfulTasks = 0;
     let isAdvancing = false;
 
-    const ASR_SERVICE_URL = "http://localhost:8000";
+    const ASR_SERVICE_URL = "http://localhost:8010";
 
     const DIGRAPHS = ["sh", "ch", "th", "wh", "ph", "ck", "qu", "ng", "ea", "ee", "oo", "ai", "oa", "ar", "or", "er", "ir", "ur"];
 
@@ -243,7 +244,7 @@ window.NonReaderStudio = (function() {
             });
         } else {
             const asrUrl = config.asr_service_url || ASR_SERVICE_URL;
-            const voice = config.tts_voice || "alloy";
+            const voice = config.tts_voice || "en-US-JennyNeural";
             fetch(`${asrUrl}/tts_phoneme_guide`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -297,7 +298,7 @@ window.NonReaderStudio = (function() {
     function init(cfg) {
         config = cfg || {};
         const asrServiceUrl = config.asr_service_url || ASR_SERVICE_URL;
-        const voice = config.tts_voice || "alloy";
+        const voice = config.tts_voice || "en-US-JennyNeural";
 
         // Parse letters
         const rawLetters = (config.nonreader_data && config.nonreader_data.letters) ? config.nonreader_data.letters : "a, e, i, o, u";
@@ -415,74 +416,120 @@ window.NonReaderStudio = (function() {
     async function startStreamingAudioEngine() {
         const asrUrl = config.asr_service_url || ASR_SERVICE_URL;
 
-        // 1. Try OpenAI Realtime WebRTC Streaming
+        // 1. Try WebSocket Streaming Acoustic ASR
         try {
-            const sessResp = await fetch(`${asrUrl}/session`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ mode: "transcription", language: "en", personality: config.tts_personality_prompt || "" })
-            });
-
-            if (sessResp.ok) {
-                const sessData = await sessResp.json();
-                const ephemeralKey = sessData.client_secret ? sessData.client_secret.value : sessData.value;
-
-                if (ephemeralKey) {
-                    pc = new RTCPeerConnection();
-                    const audioEl = document.createElement("audio");
-                    audioEl.autoplay = true;
-                    pc.ontrack = (e) => (audioEl.srcObject = e.streams[0]);
-
-                    microphoneStream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                            channelCount: 1,
-                            sampleRate: 24000
-                        }
-                    });
-                    microphoneStream.getTracks().forEach((track) => pc.addTrack(track, microphoneStream));
-
-                    dc = pc.createDataChannel("oai-events");
-                    dc.addEventListener("open", () => {
-                        console.log("OpenAI Streaming DataChannel connected for Blending!");
-                        isStreamingActive = true;
-                        updateLiveIndicator(true, "OpenAI Live Streaming Active");
-                    });
-
-                    dc.addEventListener("message", (e) => {
-                        try {
-                            const event = JSON.parse(e.data);
-                            handleStreamingEvent(event);
-                        } catch (err) {
-                            console.error("Streaming event parse error:", err);
-                        }
-                    });
-
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-
-                    const baseUrl = "https://api.openai.com/v1/realtime";
-                    const model = "gpt-4o-realtime-preview";
-                    const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-                        method: "POST",
-                        body: offer.sdp,
-                        headers: {
-                            Authorization: `Bearer ${ephemeralKey}`,
-                            "Content-Type": "application/sdp"
-                        }
-                    });
-
-                    if (sdpResponse.ok) {
-                        const answerSdp = await sdpResponse.text();
-                        await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-                        return;
-                    }
-                }
+            let wsUrl = asrUrl;
+            if (wsUrl.startsWith("http://")) {
+                wsUrl = "ws://" + wsUrl.substring(7);
+            } else if (wsUrl.startsWith("https://")) {
+                wsUrl = "wss://" + wsUrl.substring(8);
+            } else if (!wsUrl.startsWith("ws://") && !wsUrl.startsWith("wss://")) {
+                wsUrl = "ws://" + wsUrl;
             }
+            wsUrl = wsUrl.replace(/\/+$/, "") + "/ws/stream";
+
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+
+            ws.onopen = async () => {
+                ws.send(JSON.stringify({
+                    type: "start",
+                    target: lettersList.join(" ") + " " + wordsList.map(w => w.word).join(" "),
+                    attempt_id: 1,
+                    moodle_user_id: config.userid,
+                    moodle_attempt_id: config.cmid
+                }));
+
+                microphoneStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        channelCount: 1,
+                    }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                const source = audioContext.createMediaStreamSource(microphoneStream);
+
+                const pcmWorkletCode = `
+                    class PcmProcessor extends AudioWorkletProcessor {
+                        process(inputs, outputs, parameters) {
+                            const input = inputs[0];
+                            if (input && input.length > 0) {
+                                const float32Data = input[0];
+                                const pcm16 = new Int16Array(float32Data.length);
+                                for (let i = 0; i < float32Data.length; i++) {
+                                    const s = Math.max(-1, Math.min(1, float32Data[i]));
+                                    pcm16[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+                                }
+                                this.port.postMessage(pcm16.buffer, [pcm16.buffer]);
+                            }
+                            return true;
+                        }
+                    }
+                    registerProcessor('pcm-processor', PcmProcessor);
+                `;
+
+                try {
+                    const blob = new Blob([pcmWorkletCode], { type: 'application/javascript' });
+                    const workletUrl = URL.createObjectURL(blob);
+                    await audioContext.audioWorklet.addModule(workletUrl);
+
+                    processorNode = new AudioWorkletNode(audioContext, 'pcm-processor');
+                    processorNode.port.onmessage = (e) => {
+                        if (isAudioPlaying || isAdvancing || !ws || ws.readyState !== WebSocket.OPEN) return;
+                        ws.send(e.data);
+                    };
+
+                    source.connect(processorNode);
+                    processorNode.connect(audioContext.destination);
+                } catch (workletErr) {
+                    console.warn("AudioWorklet fallback to ScriptProcessor in nonreader.js:", workletErr);
+                    processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+                    processorNode.onaudioprocess = (e) => {
+                        if (isAudioPlaying || isAdvancing || !ws || ws.readyState !== WebSocket.OPEN) return;
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const pcm16 = new Int16Array(inputData.length);
+                        for (let i = 0; i < inputData.length; i++) {
+                            const s = Math.max(-1, Math.min(1, inputData[i]));
+                            pcm16[i] = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
+                        }
+                        ws.send(pcm16.buffer);
+                    };
+                    source.connect(processorNode);
+                    processorNode.connect(audioContext.destination);
+                }
+
+                isStreamingActive = true;
+                updateLiveIndicator(true, "Acoustic Streaming Active");
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if ((msg.type === "partial" || msg.type === "final") && msg.result) {
+                        const raw = msg.result.detected ? msg.result.detected.raw : "";
+                        if (raw && !isAudioPlaying && !isAdvancing) {
+                            handleLiveTranscriptStream(raw);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Streaming event parse error:", err);
+                }
+            };
+
+            ws.onerror = (err) => {
+                console.warn("WebSocket Streaming ASR connection error:", err);
+                startContinuousWebSpeechStream();
+            };
+
+            return;
         } catch (err) {
-            console.warn("OpenAI WebRTC stream fallback to Continuous Web Speech API:", err);
+            console.warn("Streaming ASR start error, fallback to Continuous Web Speech API:", err);
         }
 
         // 2. Continuous Web Speech API Fallback Streaming
@@ -918,14 +965,30 @@ window.NonReaderStudio = (function() {
         const container = document.getElementById("ra-nonreader-studio");
         if (!container) return;
 
-        if (pc) {
-            try { pc.close(); } catch(e) {}
+        if (ws) {
+            try {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "stop" }));
+                }
+                ws.close();
+            } catch(e) {}
+            ws = null;
+        }
+        if (processorNode) {
+            try { processorNode.disconnect(); } catch(e) {}
+            processorNode = null;
+        }
+        if (audioContext) {
+            try { audioContext.close(); } catch(e) {}
+            audioContext = null;
         }
         if (microphoneStream) {
             try { microphoneStream.getTracks().forEach(t => t.stop()); } catch(e) {}
+            microphoneStream = null;
         }
         if (speechRecognizer) {
             try { speechRecognizer.stop(); } catch(e) {}
+            speechRecognizer = null;
         }
 
         const totalTime = Math.round((Date.now() - startTime) / 1000);
@@ -988,7 +1051,7 @@ window.NonReaderStudio = (function() {
             reading_speed: 0.0,
             miscues_json: JSON.stringify([]),
             answers_json: JSON.stringify({ letters: lettersList, words: wordsList, accuracy: accuracy }),
-            asr_engine: 'openai_progressive_blending',
+            asr_engine: 'openpronounce_streaming',
             sesskey: config.sesskey || ''
         });
 
