@@ -1,4 +1,7 @@
 window.InstructionalReader = (function() {
+    let ws = null;
+    let audioContext = null;
+    let processorNode = null;
     let pc = null;
     let dataChannel = null;
     let microphoneStream = null;
@@ -8,6 +11,8 @@ window.InstructionalReader = (function() {
     let isAudioPlaying = false; // Anti-exploit flag: drop all audio deltas during playback
     let interventionTimer = null;
     let activeEngineName = "Connecting...";
+    let moduleVoice = "en-US-JennyNeural";
+    let moduleAsrUrl = "http://localhost:8010";
 
     // Word Isolation & Progressive Blending & Mastery State
     let isIsolatedMode = false;
@@ -20,6 +25,7 @@ window.InstructionalReader = (function() {
     let syllableStatus = []; // 'pending', 'focus', 'good', 'miscue'
     let wordMasteryCount = 0;
     let wordMasteryTarget = 2; // Dynamic teacher-configured target (1x, 2x, 3x, 4x, 5x)
+    let coachingAttemptNumber = 1; // 3-stage blending correction tracker
 
     // Reading Speed & Timer State
     let readingStartTime = null;
@@ -40,274 +46,140 @@ window.InstructionalReader = (function() {
     let liveTranscript = "";
     let finalTranscript = "";
 
-    const ASR_SERVICE_URL = "http://localhost:8000";
+    const ASR_SERVICE_URL = "http://localhost:8010";
 
-    // Dynamic alias maps populated automatically from Python NLP & OpenAI breakdown
-    let WHOLE_WORD_ALIASES = {
-        "miso": ["miso", "meeso", "meso", "me so", "mi so", "mee soh", "meesoh", "my so"],
-        "mischievous": ["mischievous", "mischief", "mis chie vous", "mischievus", "mis chuh vuhs", "mischivous"],
-        "wandered": ["wandered", "wander", "wahn derd", "wan der ed", "wonded", "wonde red"],
-        "butterfly": ["butterfly", "butter fly", "but ter fly"],
-        "caterpillar": ["caterpillar", "cater pillar", "cat er pil lar"],
-        "understanding": ["understanding", "understand ing", "un der stand ing"],
-        "edge": ["edge", "ej", "edg", "age"],
-        "bridge": ["bridge", "brij", "bridg"],
-        "knight": ["knight", "night", "nite"],
-        "night": ["night", "nite", "knight"],
-        "through": ["through", "thru", "throo", "throw"],
-        "thought": ["thought", "thawt", "thot"],
-        "laugh": ["laugh", "laf", "laff"],
-        "school": ["school", "skool", "scool"],
-        "friend": ["friend", "frend"],
-        "a": ["a", "uh", "ay", "eh", "ah", "8"],
-        "the": ["the", "da", "dee", "thuh", "thee", "th", "d"],
-        "to": ["to", "too", "two", "tu", "2"],
-        "in": ["in", "inn", "en", "an"],
-        "on": ["on", "un", "awn"],
-        "at": ["at", "et", "it"]
-    };
+    // Dynamic Runtime Pronunciation Cache (100% Word-Independent, NO Hardcoded Aliases)
+    const pronunciationCache = new Map();
 
-    let SYLLABLE_ALIASES = {
-        "mi": ["mi", "me", "mee", "my", "may", "m", "mai"],
-        "so": ["so", "sew", "sow", "soh", "saw", "s", "soul"],
-        "mis": ["mis", "miss", "miz", "mys", "mess", "ms"],
-        "chie": ["chie", "chee", "chuh", "chiv", "chief", "che", "chi", "key", "she", "tea", "gee", "tchi", "chive", "cha", "k", "g", "ch"],
-        "vous": ["vous", "vuhs", "vis", "vus", "vas", "us", "bus", "fuhs", "ves", "vouss", "v"],
-        "wan": ["wan", "wahn", "one", "won", "juan", "when"],
-        "der": ["der", "dur", "dir", "da", "there", "the", "dare", "dr"],
-        "ed": ["ed", "d", "t", "id", "head"],
-        "but": ["but", "butt", "bat", "bot"],
-        "ter": ["ter", "tur", "tir", "tar", "tor", "ta"],
-        "fly": ["fly", "flie", "fli", "ply"],
-        "cat": ["cat", "kat", "cot", "cut"],
-        "er": ["er", "ur", "ir", "a", "or", "ah"],
-        "pil": ["pil", "pill", "pel", "pull"],
-        "lar": ["lar", "ler", "lur", "lor", "la"],
-        "un": ["un", "an", "on", "oon"],
-        "stand": ["stand", "stan", "stun"],
-        "ing": ["ing", "in", "een", "eng"]
-    };
+    async function getPronunciationData(word, asrServiceUrl) {
+        const clean = cleanWord(word);
+        if (!clean) return getPhoneticGuideLocal(word);
 
-    // Jaro-Winkler string distance
-    function jaroWinkler(s1, s2) {
-        if (s1 === s2) return 1.0;
-        let l1 = s1.length, l2 = s2.length;
-        if (l1 === 0 || l2 === 0) return 0.0;
-        let matchDistance = Math.floor(Math.max(l1, l2) / 2) - 1;
-        let s1Matches = new Array(l1).fill(false);
-        let s2Matches = new Array(l2).fill(false);
-        let matches = 0, transpositions = 0;
+        if (pronunciationCache.has(clean)) {
+            return pronunciationCache.get(clean);
+        }
 
-        for (let i = 0; i < l1; i++) {
-            let start = Math.max(0, i - matchDistance);
-            let end = Math.min(i + matchDistance + 1, l2);
-            for (let j = start; j < end; j++) {
-                if (s2Matches[j] || s1[i] !== s2[j]) continue;
-                s1Matches[i] = true;
-                s2Matches[j] = true;
-                matches++;
-                break;
+        try {
+            const url = asrServiceUrl || ASR_SERVICE_URL;
+            const resp = await fetch(`${url}/phoneme_analysis`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ word: clean })
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data && data.word) {
+                    pronunciationCache.set(clean, data);
+                    return data;
+                }
             }
-        }
-        if (matches === 0) return 0.0;
-        let k = 0;
-        for (let i = 0; i < l1; i++) {
-            if (!s1Matches[i]) continue;
-            while (!s2Matches[k]) k++;
-            if (s1[i] !== s2[k]) transpositions++;
-            k++;
-        }
-        let sim = (matches / l1 + matches / l2 + (matches - transpositions / 2) / matches) / 3.0;
-        let p = 0.1, prefix = 0;
-        for (let i = 0; i < Math.min(4, Math.min(l1, l2)); i++) {
-            if (s1[i] === s2[i]) prefix++;
-            else break;
-        }
-        return sim + prefix * p * (1 - sim);
-    }
-
-    // Metaphone algorithm: reduces spoken words to consonant-based phonetic roots
-    function metaphone(word) {
-        if (!word) return "";
-        let str = word.toUpperCase().replace(/[^A-Z]/g, "");
-        if (!str) return "";
-
-        // Drop initial silent letters
-        if (/^(KN|GN|PN|AE|WR)/.test(str)) {
-            str = str.substring(1);
-        } else if (/^X/.test(str)) {
-            str = "S" + str.substring(1);
-        } else if (/^WH/.test(str)) {
-            str = "W" + str.substring(2);
+        } catch (e) {
+            console.warn("Dynamic phonetic lookup fallback:", e);
         }
 
-        let meta = "";
-        let len = str.length;
-
-        for (let i = 0; i < len; i++) {
-            let c = str[i];
-            let next = (i < len - 1) ? str[i + 1] : "";
-            let prev = (i > 0) ? str[i - 1] : "";
-
-            if (c === "B") {
-                if (prev === "M" && i === len - 1) continue;
-                meta += "B";
-            } else if (c === "C") {
-                if (next === "H") {
-                    meta += "X";
-                    i++;
-                } else if (next === "I" || next === "E" || next === "Y") {
-                    meta += "S";
-                } else {
-                    meta += "K";
-                }
-            } else if (c === "D") {
-                if (next === "G" && (i + 2 < len) && (str[i + 2] === "E" || str[i + 2] === "I" || str[i + 2] === "Y")) {
-                    meta += "J";
-                    i += 2;
-                } else {
-                    meta += "T";
-                }
-            } else if (c === "G") {
-                if (next === "H" && i === len - 2) continue;
-                if (next === "N" && i === len - 2) continue;
-                if (next === "I" || next === "E" || next === "Y") {
-                    meta += "J";
-                } else {
-                    meta += "K";
-                }
-            } else if (c === "H") {
-                if (/[AEIOU]/.test(next) && (!/[CSPTG]/.test(prev))) {
-                    meta += "H";
-                }
-            } else if (c === "F" || c === "J" || c === "L" || c === "M" || c === "N" || c === "R") {
-                meta += c;
-            } else if (c === "K") {
-                if (prev !== "C") meta += "K";
-            } else if (c === "P") {
-                if (next === "H") {
-                    meta += "F";
-                    i++;
-                } else {
-                    meta += "P";
-                }
-            } else if (c === "Q") {
-                meta += "K";
-            } else if (c === "S") {
-                if (next === "H") {
-                    meta += "X";
-                    i++;
-                } else {
-                    meta += "S";
-                }
-            } else if (c === "T") {
-                if (next === "H") {
-                    meta += "0";
-                    i++;
-                } else if (next === "I" && (i + 2 < len) && (str[i + 2] === "O" || str[i + 2] === "A")) {
-                    meta += "X";
-                } else {
-                    meta += "T";
-                }
-            } else if (c === "V") {
-                meta += "F";
-            } else if (c === "W" || c === "Y") {
-                if (/[AEIOU]/.test(next)) meta += c;
-            } else if (c === "X") {
-                meta += "KS";
-            } else if (c === "Z") {
-                meta += "S";
-            } else if (i === 0 && /[AEIOU]/.test(c)) {
-                meta += c;
-            }
-        }
-        return meta;
-    }
-
-    // Hybrid Jaro-Winkler (60%) + Double Metaphone (40%) Similarity
-    function computePhoneticSimilarity(w1, w2) {
-        if (!w1 || !w2) return 0.0;
-        
-        let w1Clean = w1.replace(/[\s\-]/g, '');
-        let w2Clean = w2.replace(/[\s\-]/g, '');
-
-        if (w1Clean === w2Clean) return 1.0;
-
-        let strSim = Math.max(
-            jaroWinkler(w1, w2),
-            jaroWinkler(w1Clean, w2Clean)
-        );
-
-        let m1 = metaphone(w1Clean);
-        let m2 = metaphone(w2Clean);
-
-        if (m1 && m2) {
-            let metaSim = (m1 === m2) ? 1.0 : jaroWinkler(m1, m2);
-            return (strSim * 0.6) + (metaSim * 0.4);
-        }
-        return strSim;
+        const localFallback = getPhoneticGuideLocal(word);
+        pronunciationCache.set(clean, localFallback);
+        return localFallback;
     }
 
     function cleanWord(str) {
-        return (str || '').replace(/[^\w]/g, '').toLowerCase();
+        return (str || '').replace(/[^\w\u00C0-\u024F\u0250-\u02AF]/g, '').toLowerCase();
     }
 
-    // Strict Whole-Word Matcher (Requires full length; single prefix like 'mi' will NEVER match 'miso')
+    // Pure Azure Speech SDK Lexical Matcher
     function matchWholeWord(targetWord, spokenPhrase) {
         const targetClean = cleanWord(targetWord);
         const spokenClean = cleanWord(spokenPhrase);
 
         if (!targetClean || !spokenClean) return false;
-        if (targetClean === spokenClean) return true;
-
-        // 1. Direct Whole-Word Alias Lookup (e.g. "miso" <-> "meeso", "mischievous" <-> "mischief")
-        if (WHOLE_WORD_ALIASES[targetClean] && WHOLE_WORD_ALIASES[targetClean].includes(spokenClean)) {
-            return true;
-        }
-
-        // 2. Anti-Prefix Guard: Spoken phrase MUST have at least 70% of target word length
-        if (spokenClean.length < Math.floor(targetClean.length * 0.70)) {
-            return false;
-        }
-
-        // 3. Metaphone Check for whole word
-        const mTarget = metaphone(targetClean);
-        const mSpoken = metaphone(spokenClean);
-        if (mTarget && mSpoken && mTarget === mSpoken) {
-            return true;
-        }
-
-        // 4. Composite Similarity (Strict >= 0.85)
-        const sim = computePhoneticSimilarity(targetClean, spokenClean);
-        return sim >= 0.85;
+        return targetClean === spokenClean;
     }
 
-    // Syllable Matcher (Tuned specifically for individual phonetic chunks e.g. "chie", "chuh", "mi", "so")
+    // Pure Azure Speech SDK Syllable Matcher
     function matchSyllable(targetSyllable, spokenToken) {
         const sylClean = cleanWord(targetSyllable);
-        const spkClean = cleanWord(spokenToken);
+        if (!sylClean || !spokenToken) return false;
 
-        if (!sylClean || !spkClean) return false;
-        if (sylClean === spkClean) return true;
+        const tokens = (typeof spokenToken === 'string')
+            ? spokenToken.toLowerCase().split(/[\s\-.]+/).map(cleanWord).filter(Boolean)
+            : [cleanWord(spokenToken)];
 
-        // 1. Syllable Alias Table Check
-        if (SYLLABLE_ALIASES[sylClean] && SYLLABLE_ALIASES[sylClean].includes(spkClean)) {
-            return true;
+        return tokens.includes(sylClean);
+    }
+
+    // Phoneme-Level Pronunciation & Continuous Blending Evaluator
+    // Enforces the core rule: ASR Lexical Match != Pronunciation Mastery
+    function evaluatePronunciation(params) {
+        const { targetWord, targetSyllables, spokenTranscript, attemptNumber = 1 } = params;
+        const cleanTarget = cleanWord(targetWord);
+        const spokenClean = (spokenTranscript || "").trim().toLowerCase();
+        const chunks = spokenClean.split(/[\s\-.]+/).filter(Boolean);
+        const joinedSpoken = chunks.join("");
+        const isMonosyllable = (!targetSyllables || targetSyllables.length <= 1);
+        
+        // 1. Exact continuous fluent match (single token, no segmentation)
+        if (spokenClean === cleanTarget || (chunks.length === 1 && chunks[0] === cleanTarget)) {
+            return {
+                lexicalMatch: true,
+                phonemeMatch: true,
+                syllableMatch: true,
+                blendingScore: 1.0,
+                errorType: "CORRECT_FLUENT",
+                mastery: true,
+                coachingRequired: false,
+                feedbackPrompt: `Super! You read "${cleanTarget}" smoothly!`
+            };
         }
-
-        // 2. Metaphone Check
-        const mTarget = metaphone(sylClean);
-        const mSpoken = metaphone(spkClean);
-        if (mTarget && mSpoken && mTarget === mSpoken) {
-            return true;
+        
+        // 2. Segmented correct word (ANTI-FALSE-POSITIVE: ASR lexical match != mastery)
+        // e.g., "gla-de", "gla de", "g l ay d", "gla...de"
+        if (joinedSpoken === cleanTarget || chunks.join(" ") === cleanTarget || matchWholeWord(cleanTarget, spokenClean)) {
+            let feedback = "";
+            if (attemptNumber === 1) {
+                feedback = `Almost! Let's blend it smoothly. Listen: ${cleanTarget}.`;
+            } else if (attemptNumber === 2) {
+                feedback = `Good try. Keep the sounds connected: ${cleanTarget}. Try it smoothly.`;
+            } else {
+                feedback = `Let's put the sounds together into one smooth word: ${cleanTarget}.`;
+            }
+            
+            return {
+                lexicalMatch: true,
+                phonemeMatch: true,
+                syllableMatch: isMonosyllable ? false : (chunks.length === targetSyllables.length),
+                blendingScore: 0.65,
+                errorType: "CORRECT_NEEDS_SMOOTHING",
+                mastery: false, // REJECT FALSE POSITIVE
+                coachingRequired: true,
+                feedbackPrompt: feedback
+            };
         }
-
-        // 3. Short Syllable Tolerant Match (length <= 4)
-        const sylSim = Math.max(
-            computePhoneticSimilarity(sylClean, spkClean),
-            jaroWinkler(sylClean, spkClean)
-        );
-        return sylSim >= 0.65;
+        
+        // 3. Unrecognized / Mispronounced attempt feedback
+        let errorType = "UNRECOGNIZED";
+        let feedback = `Listen closely: ${cleanTarget}. Now your turn!`;
+        
+        if (joinedSpoken.length > cleanTarget.length + 2) {
+            errorType = "PHONEME_ADDITION";
+            feedback = `Keep the sound pure without extra syllables. Listen: ${cleanTarget}.`;
+        } else if (joinedSpoken.length < cleanTarget.length - 2) {
+            errorType = "PHONEME_DELETION";
+            feedback = `Don't miss the inner sounds. Listen: ${cleanTarget}.`;
+        } else if (isMonosyllable && chunks.length > 1) {
+            errorType = "SYLLABLE_SEGMENTATION_ERROR";
+            feedback = `"${cleanTarget}" is one single sound. Say it together: ${cleanTarget}.`;
+        }
+        
+        return {
+            lexicalMatch: false,
+            phonemeMatch: false,
+            syllableMatch: false,
+            blendingScore: 0.0,
+            errorType: errorType,
+            mastery: false,
+            coachingRequired: true,
+            feedbackPrompt: feedback
+        };
     }
 
     function splitPassageIntoLines(passage) {
@@ -383,6 +255,7 @@ window.InstructionalReader = (function() {
 
         const cleaned = cleanWord(word);
         const b64Audio = wordAudioMap[cleaned];
+        const voiceToUse = voiceName || moduleVoice;
 
         function onPlaybackFinished() {
             liveTranscript = "";
@@ -409,7 +282,36 @@ window.InstructionalReader = (function() {
                 fallbackBrowserTTS(word, onPlaybackFinished);
             });
         } else {
-            fallbackBrowserTTS(word, onPlaybackFinished);
+            // Fetch dynamically via Azure Neural TTS endpoint
+            fetch(`${moduleAsrUrl}/tts_phoneme_guide`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ text: word, voice: voiceToUse })
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d && d.audio) {
+                    if (cleaned) wordAudioMap[cleaned] = d.audio;
+                    currentPlayingAudio = new Audio(d.audio);
+                    currentPlayingAudio.onended = () => {
+                        currentPlayingAudio = null;
+                        onPlaybackFinished();
+                    };
+                    currentPlayingAudio.onerror = () => {
+                        currentPlayingAudio = null;
+                        fallbackBrowserTTS(word, onPlaybackFinished);
+                    };
+                    currentPlayingAudio.play().catch(() => {
+                        currentPlayingAudio = null;
+                        fallbackBrowserTTS(word, onPlaybackFinished);
+                    });
+                } else {
+                    fallbackBrowserTTS(word, onPlaybackFinished);
+                }
+            })
+            .catch(() => {
+                fallbackBrowserTTS(word, onPlaybackFinished);
+            });
         }
     }
 
@@ -423,7 +325,7 @@ window.InstructionalReader = (function() {
                 return;
             }
             const currentStep = steps[stepIdx];
-            const targetWord = currentStep.spoken_target || currentStep.formula;
+            const targetWord = currentStep.spoken_target || currentStep.blend_so_far || currentStep.phoneme || currentStep.formula;
             stepIdx++;
 
             safePlayWordAudio(targetWord, voiceName, () => {
@@ -452,9 +354,26 @@ window.InstructionalReader = (function() {
 
     function stopAllMedia() {
         stopAllPlayingAudio();
+        if (processorNode) {
+            try { processorNode.disconnect(); } catch(e) {}
+            processorNode = null;
+        }
+        if (audioContext) {
+            try { audioContext.close(); } catch(e) {}
+            audioContext = null;
+        }
         if (microphoneStream) {
             microphoneStream.getTracks().forEach(t => { try { t.stop(); } catch(e) {} });
             microphoneStream = null;
+        }
+        if (ws) {
+            try {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: "stop" }));
+                }
+                ws.close();
+            } catch(e) {}
+            ws = null;
         }
         if (dataChannel) {
             try { dataChannel.close(); } catch(e) {}
@@ -491,12 +410,22 @@ window.InstructionalReader = (function() {
 
         let html = "";
         tokens.forEach((token, idx) => {
-            const isRead = idx < currentWordIndex;
+            const rec = passageWordRecords.find(r => r.line === currentLineIndex && r.index === idx);
+            const st = rec ? rec.status : 'pending';
             const isFocus = idx === currentWordIndex;
             
             let cls = "ra-inst-word";
-            if (isRead) cls += " ra-inst-word-read";
-            if (isFocus) cls += " ra-inst-word-focus";
+            if (st === 'good') {
+                cls += " ra-inst-word-good";
+            } else if (st === 'miscue') {
+                cls += " ra-inst-word-miscue";
+            } else if (idx < currentWordIndex) {
+                cls += " ra-inst-word-read";
+            }
+
+            if (isFocus) {
+                cls += " ra-inst-word-focus";
+            }
 
             html += `<span class="${cls}" id="ra-word-${currentLineIndex}-${idx}" onclick="InstructionalReader.playWord('${token}')">${token}</span> `;
         });
@@ -511,6 +440,7 @@ window.InstructionalReader = (function() {
                 prevLinesContainer.style.display = "none";
             }
         }
+        renderFinishLineUI();
     }
 
     // Render / Update Syllable Tiles with Live Green / Red / Yellow Highlights
@@ -564,14 +494,95 @@ window.InstructionalReader = (function() {
         }
     }
 
-    function markCurrentWordMiscue() {
+    function renderFinishLineUI() {
+        const boxContainer = document.querySelector(".ra-instructional-box");
+        if (!boxContainer) return;
+
+        let finishLineBox = document.getElementById("ra-finish-line-container");
+        if (!finishLineBox) {
+            finishLineBox = document.createElement("div");
+            finishLineBox.id = "ra-finish-line-container";
+            finishLineBox.className = "ra-finish-line-container";
+            if (boxContainer.parentNode) {
+                if (boxContainer.nextSibling) {
+                    boxContainer.parentNode.insertBefore(finishLineBox, boxContainer.nextSibling);
+                } else {
+                    boxContainer.parentNode.appendChild(finishLineBox);
+                }
+            }
+        }
+
+        const readRecords = passageWordRecords.filter(r => r.status === 'good' || r.status === 'miscue');
+        if (readRecords.length === 0) {
+            finishLineBox.style.display = "none";
+            return;
+        }
+
+        finishLineBox.style.display = "block";
+
+        let html = `
+            <div class="ra-finish-line-label">Completed Words (${readRecords.length}):</div>
+            <div class="ra-finish-chips-wrapper" id="ra-finish-chips-wrapper">
+        `;
+
+        readRecords.forEach(rec => {
+            const isGood = rec.status === 'good';
+            const chipCls = isGood ? 'ra-finish-chip-good' : 'ra-finish-chip-miscue';
+            const statusBadge = isGood ? '✓' : '✕';
+            
+            const guide = pronunciationCache.get(cleanWord(rec.word)) || {};
+            const targetIpa = guide.ipa || `/${rec.word}/`;
+            
+            const azureRes = rec.azureResult || {};
+            const scoreVal = azureRes.accuracy_score !== undefined ? `${Math.round(azureRes.accuracy_score)}%` : (isGood ? '100%' : 'Miscue');
+            const errType = azureRes.error_type || (isGood ? 'Fluent' : 'Mispronunciation');
+
+            let phonemesHtml = "";
+            if (azureRes.phoneme_results && azureRes.phoneme_results.length > 0) {
+                phonemesHtml = azureRes.phoneme_results.map(ph => {
+                    const phCls = ph.result === 'CORRECT' ? 'ra-ph-good' : 'ra-ph-miscue';
+                    return `<span class="ra-ph-chip ${phCls}">${ph.phoneme}: ${Math.round(ph.accuracy)}%</span>`;
+                }).join(' ');
+            } else if (guide.phonemes && guide.phonemes.length > 0) {
+                phonemesHtml = guide.phonemes.map(ph => `<span class="ra-ph-chip ra-ph-good">${ph}</span>`).join(' ');
+            }
+
+            html += `
+                <div class="ra-finish-chip ${chipCls}" onclick="InstructionalReader.playWord('${rec.word}')">
+                    <span>${rec.word}</span> <small>${statusBadge}</small>
+                    <div class="ra-phoneme-tooltip">
+                        <div class="ra-tooltip-header">Word: <strong>${rec.word}</strong> <span class="ra-tooltip-score">${scoreVal}</span></div>
+                        <div class="ra-tooltip-ipa">Target IPA: <code>[ ${targetIpa} ]</code></div>
+                        <div class="ra-tooltip-ph-breakdown">${phonemesHtml}</div>
+                        <div class="ra-tooltip-footer">Evaluation: <strong>${errType}</strong> (Click to Hear)</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `</div>`;
+        finishLineBox.innerHTML = html;
+    }
+
+    function markCurrentWordMiscue(azureWRes) {
         const targetRec = passageWordRecords.find(r => r.line === currentLineIndex && r.index === currentWordIndex);
-        if (targetRec && targetRec.status !== 'miscue') {
+        if (targetRec) {
             targetRec.status = 'miscue';
+            if (azureWRes) targetRec.azureResult = azureWRes;
             miscueCount++;
             const miscueBadge = document.getElementById("ra-miscue-badge");
             if (miscueBadge) miscueBadge.textContent = `${miscueCount} Miscue${miscueCount > 1 ? 's' : ''}`;
         }
+        renderFinishLineUI();
+    }
+
+    function markCurrentWordGood(azureWRes) {
+        const targetRec = passageWordRecords.find(r => r.line === currentLineIndex && r.index === currentWordIndex);
+        if (targetRec) {
+            targetRec.status = 'good';
+            if (azureWRes) targetRec.azureResult = azureWRes;
+        }
+        renderFinishLineUI();
     }
 
     // Google-Style Phonetic Respelling & Progressive Blending Card (Dynamic Multi-Tier Generation)
@@ -593,33 +604,7 @@ window.InstructionalReader = (function() {
             lineContainer.classList.add("ra-line-dimmed");
         }
 
-        let guide = getPhoneticGuideLocal(targetWord);
-        try {
-            const r = await fetch(`${asrServiceUrl}/breakdown_word`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ word: targetWord })
-            });
-            const data = await r.json();
-            if (data.respelling) {
-                guide = data;
-                // Dynamically integrate AI / NLP generated phonetic aliases
-                if (data.aliases && typeof data.aliases === 'object') {
-                    for (const [key, aliasList] of Object.entries(data.aliases)) {
-                        const cleanKey = cleanWord(key);
-                        if (cleanKey === isolatedTargetWord) {
-                            if (!WHOLE_WORD_ALIASES[cleanKey]) WHOLE_WORD_ALIASES[cleanKey] = [];
-                            WHOLE_WORD_ALIASES[cleanKey].push(...aliasList.map(cleanWord));
-                        } else {
-                            if (!SYLLABLE_ALIASES[cleanKey]) SYLLABLE_ALIASES[cleanKey] = [];
-                            SYLLABLE_ALIASES[cleanKey].push(...aliasList.map(cleanWord));
-                        }
-                    }
-                }
-            }
-        } catch(e) {
-            console.warn("Using local rule-based fallback for word isolation:", e);
-        }
+        let guide = await getPronunciationData(targetWord, asrServiceUrl);
 
         isolatedRespelling = guide.respelling || targetWord;
         isolatedIpa = guide.ipa || `/${targetWord}/`;
@@ -646,13 +631,18 @@ window.InstructionalReader = (function() {
         // Render Progressive Blending Steps Rows
         let stepsHtml = "";
         if (isolatedBlendingSteps.length > 1) {
-            const stepRows = isolatedBlendingSteps.map(st => `
-                <div class="ra-blending-step-row" onclick="InstructionalReader.playWord('${st.spoken_target}')">
-                    <span class="ra-step-badge">${st.label}</span>
-                    <span class="ra-step-formula">${st.formula}</span>
+            const stepRows = isolatedBlendingSteps.map((st, idx) => {
+                const label = st.label || `Step ${st.step || (idx + 1)}`;
+                const formula = st.formula || (st.blend_so_far ? `/${st.phoneme || ''}/ (${st.readable || ''}) → [ ${st.blend_so_far} ]` : `[ ${isolatedTargetWord} ]`);
+                const targetWord = st.spoken_target || st.blend_so_far || st.phoneme || isolatedTargetWord;
+                return `
+                <div class="ra-blending-step-row" onclick="InstructionalReader.playWord('${targetWord}')">
+                    <span class="ra-step-badge">${label}</span>
+                    <span class="ra-step-formula">${formula}</span>
                     <span class="ra-step-sound-btn">🔊 Hear</span>
                 </div>
-            `).join('');
+                `;
+            }).join('');
 
             stepsHtml = `
                 <div class="ra-blending-steps-container">
@@ -710,6 +700,7 @@ window.InstructionalReader = (function() {
         activeSyllableIndex = 0;
         syllableStatus = [];
         wordMasteryCount = 0;
+        coachingAttemptNumber = 1;
 
         const lineContainer = document.getElementById("ra-instructional-line");
         const isoCard = document.getElementById("ra-isolation-card");
@@ -764,11 +755,13 @@ window.InstructionalReader = (function() {
         const coachBox = document.getElementById("ra-coach-bubble");
         const statusText = document.getElementById("ra-inst-status");
         const asrServiceUrl = config.asr_service_url || ASR_SERVICE_URL;
-        const voice = config.tts_voice || "alloy";
+        const voice = config.tts_voice || "en-US-JennyNeural";
+        moduleAsrUrl = asrServiceUrl;
+        moduleVoice = voice;
 
         renderCurrentLineUI();
 
-        // Pre-fetch word TTS audio via OpenAI TTS API in background (OpenAI TTS Guide)
+        // 1. Pre-fetch word TTS audio via OpenAI TTS API in background
         const allWords = (config.passage || "").split(/\s+/);
         fetch(`${asrServiceUrl}/tts_words`, {
             method: "POST",
@@ -785,6 +778,25 @@ window.InstructionalReader = (function() {
             if (data && data.audio_map) wordAudioMap = data.audio_map;
         })
         .catch(e => console.warn("TTS audio pre-fetch fallback to browser:", e));
+
+        // 2. Pre-fetch dynamic pronunciation representations for all unique words (100% Dynamic)
+        const uniqueWords = [...new Set((config.passage || "").toLowerCase().match(/[a-z0-9]+/g) || [])];
+        if (uniqueWords.length > 0) {
+            fetch(`${asrServiceUrl}/batch_phoneme_analysis`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ words: uniqueWords })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.results) {
+                    for (const [w, guide] of Object.entries(data.results)) {
+                        pronunciationCache.set(cleanWord(w), guide);
+                    }
+                }
+            })
+            .catch(e => console.warn("Batch pronunciation pre-fetch warning:", e));
+        }
 
         function updateLiveStatus(statusMsg) {
             if (statusText) {
@@ -817,7 +829,7 @@ window.InstructionalReader = (function() {
             }
         }
 
-        function handleSpokenTranscript(spokenPhrase) {
+        function handleSpokenTranscript(spokenPhrase, wordResults) {
             // Anti-exploit: strictly drop any speech received while system audio is playing
             if (isAudioPlaying || currentLineIndex >= lines.length) return;
 
@@ -830,37 +842,56 @@ window.InstructionalReader = (function() {
             const spokenTokens = spokenPhrase.trim().toLowerCase().split(/\s+/);
             const latestSpoken = cleanWord(spokenTokens[spokenTokens.length - 1]);
             const fullSpokenChunk = cleanWord(spokenTokens.slice(-4).join(" "));
+            const wordsList = Array.isArray(wordResults) ? wordResults : [];
+
+            // Comprehensive phoneme & blending evaluation
+            const evalResult = evaluatePronunciation({
+                targetWord: targetClean,
+                targetSyllables: isIsolatedMode ? isolatedSyllables : [targetClean],
+                spokenTranscript: spokenPhrase,
+                attemptNumber: coachingAttemptNumber
+            });
 
             // --- Case A: Inside Teacher Sound-Out Guide (Dynamic Mastery & Syllable Matching) ---
             if (isIsolatedMode) {
-                // 1. Check if student articulated the entire whole word
-                const isWholeWordMatched = matchWholeWord(targetClean, latestSpoken) ||
-                                          matchWholeWord(targetClean, fullSpokenChunk);
+                // 1. Direct Whole-Word Fluent Pronunciation Check (Bypasses remaining tiles if spoken smoothly)
+                const isWholeWordSpoken = matchWholeWord(targetClean, latestSpoken) ||
+                                          matchWholeWord(targetClean, fullSpokenChunk) ||
+                                          matchWholeWord(targetClean, spokenPhrase) ||
+                                          evalResult.errorType === 'CORRECT_FLUENT';
 
-                if (isWholeWordMatched) {
+                if (isWholeWordSpoken) {
+                    liveTranscript = "";
+                    finalTranscript = "";
                     handleCoachingCompletion();
                     return;
                 }
 
-                // 2. Check active target syllable tile (e.g. [ mi ] -> [ so ] or [ mis ] -> [ chie ] -> [ vous ])
+                // 2. Active Syllable Sound-Out & Progressive Cumulative Blending Check
                 if (isolatedSyllables.length > 1 && activeSyllableIndex < isolatedSyllables.length) {
                     const targetSyl = cleanWord(isolatedSyllables[activeSyllableIndex]);
+                    const cumulativeBlend = cleanWord(isolatedSyllables.slice(0, activeSyllableIndex + 1).join(''));
+
                     const isSylMatched = matchSyllable(targetSyl, latestSpoken) ||
-                                         matchSyllable(targetSyl, fullSpokenChunk);
+                                         matchSyllable(targetSyl, fullSpokenChunk) ||
+                                         matchSyllable(targetSyl, spokenPhrase) ||
+                                         matchWholeWord(cumulativeBlend, latestSpoken) ||
+                                         matchWholeWord(cumulativeBlend, fullSpokenChunk) ||
+                                         matchWholeWord(cumulativeBlend, spokenPhrase);
 
                     if (isSylMatched) {
-                        // Correct Syllable -> Turn ONLY this tile GREEN!
                         syllableStatus[activeSyllableIndex] = 'good';
                         activeSyllableIndex++;
                         updateSyllableTilesUI();
 
-                        // If all syllables completed for this round
+                        liveTranscript = "";
+                        finalTranscript = "";
+
                         if (activeSyllableIndex >= isolatedSyllables.length) {
                             handleCoachingCompletion();
                             return;
                         }
                     } else if (latestSpoken.length >= 2 && !matchSyllable(targetSyl, latestSpoken) && !matchWholeWord(targetClean, latestSpoken)) {
-                        // Incorrect sound -> Flash RED!
                         syllableStatus[activeSyllableIndex] = 'miscue';
                         updateSyllableTilesUI();
 
@@ -869,26 +900,141 @@ window.InstructionalReader = (function() {
                                 syllableStatus[activeSyllableIndex] = 'focus';
                                 updateSyllableTilesUI();
                             }
-                        }, 900);
+                        }, 800);
+                    }
+                } else if (isolatedSyllables.length <= 1) {
+                    if (evalResult.errorType === 'CORRECT_NEEDS_SMOOTHING') {
+                        const promptEl = document.getElementById("ra-iso-prompt-text");
+                        if (promptEl) {
+                            promptEl.innerHTML = `⚠️ <span class="ra-blend-needs-smoothing" style="color: #b45309; font-weight: 700;">${evalResult.feedbackPrompt}</span>`;
+                        }
+                        coachingAttemptNumber++;
+                        safePlayWordAudio(targetToken, voice, () => {});
+                        return;
                     }
                 }
                 return;
             }
 
             // --- Case B: Normal Line-by-Line Reading ---
-            const isLineWordMatched = matchWholeWord(targetClean, latestSpoken) ||
-                                      matchWholeWord(targetClean, fullSpokenChunk) ||
-                                      matchSyllable(targetClean, latestSpoken);
+            // Multi-word catch-up loop: scans incoming stream tokens & Azure acoustic scores
+            let wordAdvancedInTurn = false;
+            let currentLine = lines[currentLineIndex];
+            if (!currentLine) return;
+            let lineTokens = currentLine.split(/\s+/);
+            let lastMatchedSpokenIdx = 0;
 
-            if (isLineWordMatched) {
-                advanceWordSuccessfully();
-            } else {
-                // Potential mispronunciation or delay -> trigger Sound-Out Guide
-                if (!interventionTimer && !isIsolatedMode) {
-                    interventionTimer = setTimeout(() => {
-                        enterWordIsolationMode(targetToken, voice, asrServiceUrl);
-                    }, 3000);
+            while (currentLineIndex < lines.length && currentWordIndex < lineTokens.length) {
+                const activeToken = lineTokens[currentWordIndex];
+                const activeClean = cleanWord(activeToken);
+
+                // Calculate global passage index of activeToken
+                let targetPassageIdx = 0;
+                for (let l = 0; l < currentLineIndex; l++) {
+                    targetPassageIdx += (lines[l] || "").split(/\s+/).filter(Boolean).length;
                 }
+                targetPassageIdx += currentWordIndex;
+
+                // Look up Azure per-word acoustic assessment if present (by clean word or passage index)
+                const azureWRes = wordsList.find(w => cleanWord(w.word) === activeClean || w.passage_idx === targetPassageIdx);
+
+                if (azureWRes) {
+                    const isWordMatch = cleanWord(azureWRes.word) === activeClean || matchWholeWord(activeClean, cleanWord(azureWRes.word));
+
+                    if (isWordMatch) {
+                        const isMiscue = azureWRes.is_miscue ||
+                                         azureWRes.error_type === "Mispronunciation" ||
+                                         (azureWRes.accuracy_score !== undefined && azureWRes.accuracy_score < 60.0);
+
+                        if (isMiscue) {
+                            if (azureWRes.error_type === "Omission") {
+                                // Word skipped: mark miscue and advance without interrupting continuous reading
+                                markCurrentWordMiscue(azureWRes);
+                                wordAdvancedInTurn = true;
+                                const prevLineIndex = currentLineIndex;
+                                advanceWordSuccessfully();
+
+                                if (currentLineIndex >= lines.length) break;
+                                if (currentLineIndex !== prevLineIndex) {
+                                    currentLine = lines[currentLineIndex];
+                                    if (!currentLine) break;
+                                    lineTokens = currentLine.split(/\s+/);
+                                }
+                                continue;
+                            } else {
+                                // Mispronunciation: mark miscue, update UI, launch Coach Mode
+                                markCurrentWordMiscue(azureWRes);
+                                renderCurrentLineUI();
+                                enterWordIsolationMode(activeToken, voice, asrServiceUrl);
+                                break;
+                            }
+                        } else {
+                            // Azure confirmed accurate pronunciation! Mark good, advance word.
+                            markCurrentWordGood(azureWRes);
+                            wordAdvancedInTurn = true;
+                            const prevLineIndex = currentLineIndex;
+                            advanceWordSuccessfully();
+
+                            if (currentLineIndex >= lines.length) break;
+                            if (currentLineIndex !== prevLineIndex) {
+                                currentLine = lines[currentLineIndex];
+                                if (!currentLine) break;
+                                lineTokens = currentLine.split(/\s+/);
+                            }
+                            continue;
+                        }
+                    } else {
+                        // Check if spoken word matches a future word in current line (Word Omission)
+                        const futureMatchOffset = lineTokens.slice(currentWordIndex + 1).findIndex(t => matchWholeWord(cleanWord(t), cleanWord(azureWRes.word)));
+                        if (futureMatchOffset !== -1) {
+                            // Student skipped activeToken! Mark Omission Miscue
+                            markCurrentWordMiscue({ error_type: 'Omission', accuracy_score: 0 });
+                            const prevLineIndex = currentLineIndex;
+                            advanceWordSuccessfully();
+
+                            if (currentLineIndex >= lines.length) break;
+                            if (currentLineIndex !== prevLineIndex) {
+                                currentLine = lines[currentLineIndex];
+                                if (!currentLine) break;
+                                lineTokens = currentLine.split(/\s+/);
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                // Fallback string matching if explicit Azure per-word result is not in partial buffer yet
+                // Match remaining spoken tokens in strict sequential order
+                const remainingSpoken = spokenTokens.slice(lastMatchedSpokenIdx);
+                const matchedRelIdx = remainingSpoken.findIndex(t => matchWholeWord(activeClean, cleanWord(t)));
+
+                if (matchedRelIdx !== -1) {
+                    lastMatchedSpokenIdx += matchedRelIdx + 1;
+                    markCurrentWordGood();
+                    wordAdvancedInTurn = true;
+                    const prevLineIndex = currentLineIndex;
+                    advanceWordSuccessfully();
+
+                    if (currentLineIndex >= lines.length) break;
+                    if (currentLineIndex !== prevLineIndex) {
+                        currentLine = lines[currentLineIndex];
+                        if (!currentLine) break;
+                        lineTokens = currentLine.split(/\s+/);
+                    }
+                } else if (remainingSpoken.length === 1 && cleanWord(remainingSpoken[0]).length >= 3 && !matchWholeWord(activeClean, cleanWord(remainingSpoken[0]))) {
+                    // Single spoken token attempted at active position but mispronounced: trigger Coach Mode
+                    markCurrentWordMiscue();
+                    renderCurrentLineUI();
+                    enterWordIsolationMode(activeToken, voice, asrServiceUrl);
+                    break;
+                } else {
+                    break;
+                }
+            }
+
+            if (!wordAdvancedInTurn && !isIsolatedMode && spokenPhrase.trim().length > 0) {
+                const curToken = lineTokens[currentWordIndex] || "";
+                if (curToken) resetHesitationTimer(curToken);
             }
         }
 
@@ -934,114 +1080,102 @@ window.InstructionalReader = (function() {
 
         function resetHesitationTimer(nextWord) {
             if (interventionTimer) clearTimeout(interventionTimer);
-            if (!nextWord) return;
+            if (!nextWord || isIsolatedMode) return;
             interventionTimer = setTimeout(() => {
                 enterWordIsolationMode(nextWord, voice, asrServiceUrl);
-            }, 4500); // 4.5s hesitation timeout
+            }, 7000); // 7.0s hesitation timeout (gives reader space to decode without interruption)
         }
 
         async function startWebRTCEngine() {
             try {
-                let clientSecret = null;
-                try {
-                    const sessResp = await fetch(`${asrServiceUrl}/session`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ personality: config.tts_personality_prompt || "" })
-                    });
-                    const sessData = await sessResp.json().catch(() => ({}));
-                    if (sessResp.ok && sessData.client_secret) {
-                        clientSecret = sessData.client_secret;
-                    }
-                } catch(e) {
-                    console.warn("Could not reach Python ASR service /session endpoint:", e);
+                let wsUrl = asrServiceUrl || "http://localhost:8010";
+                if (wsUrl.startsWith("http://")) {
+                    wsUrl = "ws://" + wsUrl.substring(7);
+                } else if (wsUrl.startsWith("https://")) {
+                    wsUrl = "wss://" + wsUrl.substring(8);
+                } else if (!wsUrl.startsWith("ws://") && !wsUrl.startsWith("wss://")) {
+                    wsUrl = "ws://" + wsUrl;
                 }
+                wsUrl = wsUrl.replace(/\/+$/, "") + "/ws/stream";
 
-                if (clientSecret) {
-                    activeEngineName = "OpenAI Realtime (gpt-live-transcribe)";
-                    pc = new RTCPeerConnection();
-                    dataChannel = pc.createDataChannel("oai-events");
+                activeEngineName = "Streaming Acoustic ASR";
+                ws = new WebSocket(wsUrl);
+                ws.binaryType = "arraybuffer";
 
-                    dataChannel.onopen = () => {
-                        updateLiveStatus(`Listening (${activeEngineName})... Reading Line ${currentLineIndex + 1} of ${lines.length}.`);
-                        dataChannel.send(JSON.stringify({
-                            type: "session.update",
-                            session: {
-                                type: "transcription",
-                                audio: {
-                                    input: {
-                                        transcription: { model: "gpt-live-transcribe", delay: "minimal" },
-                                        turn_detection: null
-                                    }
-                                }
-                            }
-                        }));
-                    };
-
-                    dataChannel.onmessage = (event) => {
-                        const msg = JSON.parse(event.data);
-                        if (msg.type === "conversation.item.input_audio_transcription.delta") {
-                            liveTranscript += (msg.delta || "");
-                            handleSpokenTranscript(msg.delta || "");
-                        } else if (msg.type === "conversation.item.input_audio_transcription.completed") {
-                            finalTranscript += (msg.transcript || "") + " ";
-                            liveTranscript = "";
-                            handleSpokenTranscript(msg.transcript || "");
-                        }
-                    };
+                ws.onopen = async () => {
+                    ws.send(JSON.stringify({
+                        type: "start",
+                        target: lines.join(" ") || "",
+                        attempt_id: 1,
+                        moodle_user_id: config.userid,
+                        moodle_attempt_id: config.cmid
+                    }));
 
                     microphoneStream = await navigator.mediaDevices.getUserMedia({
-                        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
-                    });
-
-                    microphoneStream.getTracks().forEach(track => pc.addTrack(track, microphoneStream));
-
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
-
-                    const sdpResp = await fetch("https://api.openai.com/v1/realtime/calls", {
-                        method: "POST",
-                        body: offer.sdp,
-                        headers: {
-                            "Authorization": `Bearer ${clientSecret}`,
-                            "Content-Type": "application/sdp"
+                        audio: {
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
                         }
                     });
 
-                    if (!sdpResp.ok) throw new Error(await sdpResp.text());
-                    const answerSdp = await sdpResp.text();
-                    await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-                } else {
-                    activeEngineName = "Browser Speech Engine (Offline Fallback)";
-                    const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    if (SpeechRecognitionClass) {
-                        speechRecognition = new SpeechRecognitionClass();
-                        speechRecognition.continuous = true;
-                        speechRecognition.interimResults = true;
-                        speechRecognition.lang = 'en-US';
-
-                        speechRecognition.onresult = (event) => {
-                            let interim = '';
-                            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                                if (event.results[i].isFinal) {
-                                    finalTranscript += event.results[i][0].transcript + ' ';
-                                    handleSpokenTranscript(event.results[i][0].transcript);
-                                } else {
-                                    interim += event.results[i][0].transcript;
-                                    handleSpokenTranscript(interim);
-                                }
-                            }
-                        };
-                        speechRecognition.start();
-                        updateLiveStatus(`Listening (${activeEngineName})... Reading Line ${currentLineIndex + 1} of ${lines.length}.`);
-                    } else {
-                        updateLiveStatus("Error: ASR service offline and Browser Speech API not supported.");
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
                     }
-                }
+                    const source = audioContext.createMediaStreamSource(microphoneStream);
+                    processorNode = audioContext.createScriptProcessor(2048, 1, 1);
+
+                    const inputSampleRate = audioContext.sampleRate;
+                    const targetSampleRate = 16000;
+
+                    processorNode.onaudioprocess = (e) => {
+                        if (!isRecording || isAudioPlaying || !ws || ws.readyState !== WebSocket.OPEN) return;
+                        const inputData = e.inputBuffer.getChannelData(0);
+
+                        let resampled;
+                        if (inputSampleRate === targetSampleRate) {
+                            resampled = inputData;
+                        } else {
+                            const ratio = inputSampleRate / targetSampleRate;
+                            const newLength = Math.round(inputData.length / ratio);
+                            resampled = new Float32Array(newLength);
+                            for (let i = 0; i < newLength; i++) {
+                                resampled[i] = inputData[Math.min(Math.round(i * ratio), inputData.length - 1)];
+                            }
+                        }
+                        ws.send(resampled.buffer);
+                    };
+
+                    source.connect(processorNode);
+                    processorNode.connect(audioContext.destination);
+
+                    updateLiveStatus(`🎙️ Listening (${activeEngineName})... Reading Line ${currentLineIndex + 1} of ${lines.length}.`);
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if ((msg.type === "partial" || msg.type === "final") && msg.result) {
+                            const raw = msg.result.detected ? msg.result.detected.raw : (msg.text || "");
+                            const wordResults = msg.result.words || msg.word_results || [];
+                            if (raw || wordResults.length > 0) {
+                                liveTranscript = raw;
+                                handleSpokenTranscript(raw, wordResults);
+                            }
+                        }
+                    } catch(e) {}
+                };
+
+                ws.onerror = (err) => {
+                    console.warn("WebSocket Streaming ASR connection error:", err);
+                    activeEngineName = "Browser Speech Engine (Fallback)";
+                    updateLiveStatus(`Listening (${activeEngineName})... Reading Line ${currentLineIndex + 1} of ${lines.length}.`);
+                };
 
             } catch (err) {
-                console.error("Instructional WebRTC start error:", err);
+                console.error("Instructional Streaming ASR start error:", err);
                 activeEngineName = "Browser Speech Engine (Fallback)";
                 updateLiveStatus(`Listening (${activeEngineName})... Reading Line ${currentLineIndex + 1} of ${lines.length}.`);
             }
@@ -1246,10 +1380,13 @@ window.InstructionalReader = (function() {
     return {
         init: init,
         playWord: function(word) {
-            safePlayWordAudio(word, "alloy");
+            safePlayWordAudio(word, moduleVoice);
         },
         playSteps: function() {
-            playProgressiveSoundOut(isolatedBlendingSteps, "alloy");
-        }
+            playProgressiveSoundOut(isolatedBlendingSteps, moduleVoice);
+        },
+        matchSyllable: matchSyllable,
+        matchWholeWord: matchWholeWord,
+        evaluatePronunciation: evaluatePronunciation
     };
 })();
