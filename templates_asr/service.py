@@ -355,7 +355,7 @@ class AzureSession:
         Official Microsoft Azure Speech SDK Reference-Text Alignment Algorithm
         Adapted for Real-time Continuous Recognition Streaming.
         
-        Aligns recognized words from the current audio utterance against the reference
+        Aligns recognized words from the current audio utterance against a local window of reference
         passage text starting from self._next_passage_idx.
         Does NOT synthesize Omission miscues for trailing unread passage words past the end
         of the current spoken utterance chunk.
@@ -364,9 +364,14 @@ class AzureSession:
             return raw_word_results
 
         ref_words_all = [w.strip(string.punctuation).lower() for w in self.passage_text.split() if w.strip(string.punctuation)]
-        ref_words_slice = ref_words_all[self._next_passage_idx:]
         rec_words_clean = [w.get("word", "").strip(string.punctuation).lower() for w in raw_word_results]
 
+        # Enforce Bounded Local Search Window to prevent short words (e.g., 'a', 'the') matching distant sentences
+        search_window_size = max(len(rec_words_clean) + 3, 6)
+        ref_words_slice = ref_words_all[self._next_passage_idx : self._next_passage_idx + search_window_size]
+
+        if not ref_words_slice:
+            ref_words_slice = ref_words_all[self._next_passage_idx:]
         if not ref_words_slice:
             ref_words_slice = ref_words_all
             self._next_passage_idx = 0

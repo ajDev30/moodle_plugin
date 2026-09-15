@@ -948,19 +948,27 @@ window.InstructionalReader = (function() {
 
                         if (isMiscue) {
                             if (azureWRes.error_type === "Omission") {
-                                // Word skipped: mark miscue and advance without interrupting continuous reading
-                                markCurrentWordMiscue(azureWRes);
-                                wordAdvancedInTurn = true;
-                                const prevLineIndex = currentLineIndex;
-                                advanceWordSuccessfully();
+                                // Only advance omitted word if student actually spoke the immediate next word
+                                const nextToken = lineTokens[currentWordIndex + 1];
+                                const isNextSpoken = nextToken && spokenTokens.some(st => matchWholeWord(cleanWord(nextToken), cleanWord(st)));
 
-                                if (currentLineIndex >= lines.length) break;
-                                if (currentLineIndex !== prevLineIndex) {
-                                    currentLine = lines[currentLineIndex];
-                                    if (!currentLine) break;
-                                    lineTokens = currentLine.split(/\s+/);
+                                if (isNextSpoken) {
+                                    markCurrentWordMiscue(azureWRes);
+                                    wordAdvancedInTurn = true;
+                                    const prevLineIndex = currentLineIndex;
+                                    advanceWordSuccessfully();
+
+                                    if (currentLineIndex >= lines.length) break;
+                                    if (currentLineIndex !== prevLineIndex) {
+                                        currentLine = lines[currentLineIndex];
+                                        if (!currentLine) break;
+                                        lineTokens = currentLine.split(/\s+/);
+                                    }
+                                    continue;
+                                } else {
+                                    // Student hasn't spoken next word yet — stop auto-advancing!
+                                    break;
                                 }
-                                continue;
                             } else {
                                 // Mispronunciation: mark miscue, update UI, launch Coach Mode
                                 markCurrentWordMiscue(azureWRes);
