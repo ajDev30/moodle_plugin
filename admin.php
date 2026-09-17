@@ -241,6 +241,10 @@ echo $OUTPUT->header();
             <a href="<?php echo new moodle_url('/admin/settings.php?section=modsettingreadingassessment'); ?>" class="btn btn-outline-primary">
                 ⚙️ Plugin Settings
             </a>
+            
+            <a href="<?php echo new moodle_url('/mod/readingassessment/external_manage.php'); ?>" class="btn btn-warning ml-auto" style="font-weight: 600;">
+                📝 External Screening Dashboard ➔
+            </a>
         </div>
 
         <!-- Live Installation Progress Console -->
