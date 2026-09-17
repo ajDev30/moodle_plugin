@@ -42,6 +42,7 @@ class mod_readingassessment_mod_form extends moodleform_mod {
             'assessment'    => '📊 ' . get_string('activitytype_assessment', 'mod_readingassessment'),
             'instructional' => '📖 ' . get_string('activitytype_instructional', 'mod_readingassessment'),
             'nonreader'     => '🎨 ' . get_string('activitytype_nonreader', 'mod_readingassessment'),
+            'struggling'    => '🆘 Struggling Reader (Intervention & Support)',
         ];
         $mform->addElement('select', 'activitytype', get_string('activitytype', 'mod_readingassessment'), $activity_type_options);
         $mform->setDefault('activitytype', 'assessment');
@@ -54,24 +55,23 @@ class mod_readingassessment_mod_form extends moodleform_mod {
         $mform->addElement('header', 'tts_coaching_section', '🎙️ Teacher Voice & AI Coaching Configuration');
         $mform->hideIf('tts_coaching_section', 'activitytype', 'eq', 'assessment');
 
-        // Voice Model Selector (13 OpenAI Voices)
+        // Voice Model Selector (Azure Speech SDK Neural Voices)
         $voice_options = [
-            'alloy'   => 'Alloy (Clear & Neutral)',
-            'nova'    => 'Nova (Friendly & Natural)',
-            'shimmer' => 'Shimmer (Warm & Expressive)',
-            'sage'    => 'Sage (Calm & Authoritative)',
-            'coral'   => 'Coral (Warm & Engaging)',
-            'ash'     => 'Ash (Relaxed & Soft)',
-            'ballad'  => 'Ballad (Melodic & Warm)',
-            'echo'    => 'Echo (Crisp Male)',
-            'fable'   => 'Fable (British Accent)',
-            'onyx'    => 'Onyx (Deep Male)',
-            'verse'   => 'Verse (Dynamic & Expressive)',
-            'marin'   => 'Marin (Gentle & Smooth)',
-            'cedar'   => 'Cedar (Warm & Confident)',
+            'en-US-JennyNeural'       => 'Jenny (US - Warm & Friendly Female) [Default]',
+            'en-US-GuyNeural'         => 'Guy (US - Clear & Natural Male)',
+            'en-US-AriaNeural'        => 'Aria (US - Expressive & Positive Female)',
+            'en-US-AnaNeural'         => 'Ana (US - Young Child Female)',
+            'en-US-ChristopherNeural' => 'Christopher (US - Warm & Trustworthy Male)',
+            'en-US-EricNeural'        => 'Eric (US - Conversational & Friendly Male)',
+            'en-US-MichelleNeural'    => 'Michelle (US - Gentle & Clear Female)',
+            'en-GB-SoniaNeural'       => 'Sonia (UK - British Expressive Female)',
+            'en-GB-RyanNeural'        => 'Ryan (UK - British Professional Male)',
+            'en-AU-NatashaNeural'     => 'Natasha (Australia - Friendly Female)',
+            'en-PH-RosaNeural'        => 'Rosa (Philippines - Clear & Engaging Female)',
+            'en-PH-JamesNeural'       => 'James (Philippines - Articulate Male)',
         ];
         $mform->addElement('select', 'tts_voice', get_string('tts_voice', 'mod_readingassessment'), $voice_options);
-        $mform->setDefault('tts_voice', 'alloy');
+        $mform->setDefault('tts_voice', 'en-US-JennyNeural');
         $mform->addHelpButton('tts_voice', 'tts_voice', 'mod_readingassessment');
         $mform->hideIf('tts_voice', 'activitytype', 'eq', 'assessment');
 

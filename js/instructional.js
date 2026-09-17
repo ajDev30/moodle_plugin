@@ -14,7 +14,7 @@ window.InstructionalReader = (function() {
     let moduleVoice = "en-US-JennyNeural";
     let moduleAsrUrl = "http://localhost:8010";
 
-    // Word Isolation & Progressive Blending & Mastery State
+    let isStrugglingMode = false;
     let isIsolatedMode = false;
     let isolatedTargetWord = "";
     let isolatedRespelling = "";
@@ -143,6 +143,20 @@ window.InstructionalReader = (function() {
                 feedback = `Let's put the sounds together into one smooth word: ${cleanTarget}.`;
             }
             
+            // If struggling reader, they tend to read word-by-word. We don't enforce smooth blending as strictly.
+            if (isStrugglingMode && matchWholeWord(cleanTarget, spokenClean)) {
+                return {
+                    lexicalMatch: true,
+                    phonemeMatch: true,
+                    syllableMatch: true,
+                    blendingScore: 1.0,
+                    errorType: "CORRECT_WORD_BY_WORD",
+                    mastery: true,
+                    coachingRequired: false,
+                    feedbackPrompt: `Good job!`
+                };
+            }
+
             return {
                 lexicalMatch: true,
                 phonemeMatch: true,
@@ -434,7 +448,83 @@ window.InstructionalReader = (function() {
 
         if (prevLinesContainer) {
             if (currentLineIndex > 0) {
-                prevLinesContainer.innerHTML = lines.slice(0, currentLineIndex).map(l => `<div class="ra-inst-prev-line">✓ ${l}</div>`).join('');
+                let prevHtml = "";
+                for (let i = 0; i < currentLineIndex; i++) {
+                    let lineHtml = `<div class="ra-inst-prev-line" style="margin-bottom: 8px;">`;
+                    const lineTokens = lines[i].split(/\s+/);
+                    lineTokens.forEach((token, idx) => {
+                        const rec = passageWordRecords.find(r => r.line === i && r.index === idx);
+                        if (!rec || (rec.status !== 'good' && rec.status !== 'miscue')) {
+                            lineHtml += `<span style="color: rgba(0,0,0,0.295); margin-right: 6px;">${token}</span>`;
+                            return;
+                        }
+                        
+                        const isGood = rec.status === 'good';
+                        const azureRes = rec.azureResult || {};
+
+                        let scoreNum = 100;
+                        if (azureRes.accuracy_score !== undefined && azureRes.accuracy_score !== null) {
+                            scoreNum = Math.round(azureRes.accuracy_score);
+                        } else if (rec.status === 'good') {
+                            scoreNum = 100;
+                        } else {
+                            scoreNum = 50;
+                        }
+
+                        // Thresholds:
+                        // >= 90: Green (#16a34a)
+                        // 75 - 89: Orange (#ea580c) — Minor Issue but could improve
+                        // 0 - 74: Red (#dc2626) — Likely pronunciation/reading errors
+                        let textColor = "#16a34a";
+                        let statusCategory = "Fluent (High Accuracy)";
+                        let statusBadgeCls = "ra-thresh-green";
+
+                        if (scoreNum >= 90) {
+                            textColor = "#16a34a";
+                            statusCategory = "Fluent (High Accuracy)";
+                            statusBadgeCls = "ra-thresh-green";
+                        } else if (scoreNum >= 75) {
+                            textColor = "#ea580c";
+                            statusCategory = "Minor Issue (Could Improve)";
+                            statusBadgeCls = "ra-thresh-orange";
+                        } else {
+                            textColor = "#dc2626";
+                            statusCategory = "Likely Pronunciation / Reading Error";
+                            statusBadgeCls = "ra-thresh-red";
+                        }
+
+                        const guide = pronunciationCache.get(cleanWord(rec.word)) || {};
+                        const targetIpa = guide.ipa || `/${rec.word}/`;
+                        const errType = azureRes.error_type || statusCategory;
+                        
+                        let phonemesHtml = "";
+                        if (azureRes.phoneme_results && azureRes.phoneme_results.length > 0) {
+                            phonemesHtml = azureRes.phoneme_results.map(ph => {
+                                const phAcc = Math.round(ph.accuracy || 0);
+                                let phCls = 'ra-ph-good';
+                                if (phAcc < 75) phCls = 'ra-ph-miscue';
+                                else if (phAcc < 90) phCls = 'ra-ph-warn';
+                                return `<span class="ra-ph-chip ${phCls}">${ph.phoneme}: ${phAcc}%</span>`;
+                            }).join(' ');
+                        } else if (guide.phonemes && guide.phonemes.length > 0) {
+                            phonemesHtml = guide.phonemes.map(ph => `<span class="ra-ph-chip ra-ph-good">${ph}</span>`).join(' ');
+                        }
+                        
+                        lineHtml += `
+                            <span class="ra-finish-chip" style="background: none; border: none; padding: 0; margin-right: 6px; box-shadow: none; font-size: 1.1rem; color: ${textColor}; font-weight: 600;" onclick="InstructionalReader.playWord('${rec.word}')">
+                                <span>${token}</span>
+                                <div class="ra-phoneme-tooltip">
+                                    <div class="ra-tooltip-header">Word: <strong>${rec.word}</strong> <span class="ra-tooltip-score ${statusBadgeCls}">${scoreNum}%</span></div>
+                                    <div class="ra-tooltip-ipa">Target IPA: <code>[ ${targetIpa} ]</code></div>
+                                    <div class="ra-tooltip-ph-breakdown">${phonemesHtml}</div>
+                                    <div class="ra-tooltip-footer">Evaluation: <strong>${statusCategory}</strong> (Click to Hear)</div>
+                                </div>
+                            </span>`;
+                    });
+                    lineHtml += `</div>`;
+                    prevHtml += lineHtml;
+                }
+                prevLinesContainer.innerHTML = prevHtml;
                 prevLinesContainer.style.display = "block";
             } else {
                 prevLinesContainer.style.display = "none";
@@ -495,73 +585,10 @@ window.InstructionalReader = (function() {
     }
 
     function renderFinishLineUI() {
-        const boxContainer = document.querySelector(".ra-instructional-box");
-        if (!boxContainer) return;
-
         let finishLineBox = document.getElementById("ra-finish-line-container");
-        if (!finishLineBox) {
-            finishLineBox = document.createElement("div");
-            finishLineBox.id = "ra-finish-line-container";
-            finishLineBox.className = "ra-finish-line-container";
-            if (boxContainer.parentNode) {
-                if (boxContainer.nextSibling) {
-                    boxContainer.parentNode.insertBefore(finishLineBox, boxContainer.nextSibling);
-                } else {
-                    boxContainer.parentNode.appendChild(finishLineBox);
-                }
-            }
+        if (finishLineBox) {
+            finishLineBox.remove();
         }
-
-        const readRecords = passageWordRecords.filter(r => r.status === 'good' || r.status === 'miscue');
-        if (readRecords.length === 0) {
-            finishLineBox.style.display = "none";
-            return;
-        }
-
-        finishLineBox.style.display = "block";
-
-        let html = `
-            <div class="ra-finish-line-label">Completed Words (${readRecords.length}):</div>
-            <div class="ra-finish-chips-wrapper" id="ra-finish-chips-wrapper">
-        `;
-
-        readRecords.forEach(rec => {
-            const isGood = rec.status === 'good';
-            const chipCls = isGood ? 'ra-finish-chip-good' : 'ra-finish-chip-miscue';
-            const statusBadge = isGood ? '✓' : '✕';
-            
-            const guide = pronunciationCache.get(cleanWord(rec.word)) || {};
-            const targetIpa = guide.ipa || `/${rec.word}/`;
-            
-            const azureRes = rec.azureResult || {};
-            const scoreVal = azureRes.accuracy_score !== undefined ? `${Math.round(azureRes.accuracy_score)}%` : (isGood ? '100%' : 'Miscue');
-            const errType = azureRes.error_type || (isGood ? 'Fluent' : 'Mispronunciation');
-
-            let phonemesHtml = "";
-            if (azureRes.phoneme_results && azureRes.phoneme_results.length > 0) {
-                phonemesHtml = azureRes.phoneme_results.map(ph => {
-                    const phCls = ph.result === 'CORRECT' ? 'ra-ph-good' : 'ra-ph-miscue';
-                    return `<span class="ra-ph-chip ${phCls}">${ph.phoneme}: ${Math.round(ph.accuracy)}%</span>`;
-                }).join(' ');
-            } else if (guide.phonemes && guide.phonemes.length > 0) {
-                phonemesHtml = guide.phonemes.map(ph => `<span class="ra-ph-chip ra-ph-good">${ph}</span>`).join(' ');
-            }
-
-            html += `
-                <div class="ra-finish-chip ${chipCls}" onclick="InstructionalReader.playWord('${rec.word}')">
-                    <span>${rec.word}</span> <small>${statusBadge}</small>
-                    <div class="ra-phoneme-tooltip">
-                        <div class="ra-tooltip-header">Word: <strong>${rec.word}</strong> <span class="ra-tooltip-score">${scoreVal}</span></div>
-                        <div class="ra-tooltip-ipa">Target IPA: <code>[ ${targetIpa} ]</code></div>
-                        <div class="ra-tooltip-ph-breakdown">${phonemesHtml}</div>
-                        <div class="ra-tooltip-footer">Evaluation: <strong>${errType}</strong> (Click to Hear)</div>
-                    </div>
-                </div>
-            `;
-        });
-
-        html += `</div>`;
-        finishLineBox.innerHTML = html;
     }
 
     function markCurrentWordMiscue(azureWRes) {
@@ -718,6 +745,7 @@ window.InstructionalReader = (function() {
     }
 
     function init(config) {
+        isStrugglingMode = config.is_struggling || false;
         lines = splitPassageIntoLines(config.passage || "");
         currentLineIndex = 0;
         currentWordIndex = 0;
@@ -1085,7 +1113,7 @@ window.InstructionalReader = (function() {
             if (!nextWord || isIsolatedMode) return;
             interventionTimer = setTimeout(() => {
                 enterWordIsolationMode(nextWord, voice, asrServiceUrl);
-            }, 15000); // 15.0s hesitation timeout allowance
+            }, isStrugglingMode ? 25000 : 15000); // 15.0s standard, 25.0s for struggling readers
         }
 
         async function startWebRTCEngine() {

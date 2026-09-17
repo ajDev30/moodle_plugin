@@ -8,8 +8,9 @@ require_capability('moodle/site:config', context_system::instance());
 
 $action = optional_param('action', '', PARAM_ALPHA);
 $os = get_config('readingassessment', 'operating_system') ?: 'linux';
-$port = get_config('readingassessment', 'service_port') ?: 8000;
-$apikey = get_config('readingassessment', 'openai_apikey');
+$port = get_config('readingassessment', 'service_port') ?: 8010;
+$azure_key    = get_config('readingassessment', 'azure_speech_key') ?: '';
+$azure_region = get_config('readingassessment', 'azure_speech_region') ?: 'southeastasia';
 
 // Dedicated internal virtualenv directory
 $venv_dir = $CFG->dirroot . '/mod/readingassessment/venv_asr';

@@ -12,9 +12,10 @@ require_capability('moodle/site:config', $context);
 @set_time_limit(300);
 header('Content-Type: application/json; charset=utf-8');
 
-$apikey = get_config('readingassessment', 'openai_apikey');
-$os = get_config('readingassessment', 'operating_system') ?: 'linux';
-$port = get_config('readingassessment', 'service_port') ?: 8000;
+$azure_key    = get_config('readingassessment', 'azure_speech_key') ?: '';
+$azure_region = get_config('readingassessment', 'azure_speech_region') ?: 'southeastasia';
+$os           = get_config('readingassessment', 'operating_system') ?: 'linux';
+$port         = get_config('readingassessment', 'service_port') ?: 8010;
 
 $python_path = __DIR__ . DIRECTORY_SEPARATOR . 'venv_asr';
 

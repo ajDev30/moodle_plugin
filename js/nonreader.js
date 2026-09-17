@@ -30,8 +30,6 @@ window.NonReaderStudio = (function() {
     let audioContext = null;
     let processorNode = null;
     let isStreamingActive = false;
-    let isSpeechRecognitionActive = false;
-    let speechRecognizer = null;
     let startTime = null;
 
     let totalTasks = 0;
@@ -171,18 +169,7 @@ window.NonReaderStudio = (function() {
             });
         }
 
-        // 2. Web Speech Recognition abort and pause
-        if (speechRecognizer) {
-            if (!enabled) {
-                try { speechRecognizer.abort(); } catch(e) {}
-            } else {
-                if (isStarted && !isAudioPlaying && currentStage <= 3) {
-                    try { speechRecognizer.start(); } catch(e) {}
-                }
-            }
-        }
-
-        // 3. Update Visual Status Badge
+        // 2. Update Visual Status Badge
         updateLiveIndicator(enabled, enabled ? "Live Mic Listening" : "🔇 Mic Muted (Teacher Speaking)");
     }
 
@@ -524,72 +511,13 @@ window.NonReaderStudio = (function() {
 
             ws.onerror = (err) => {
                 console.warn("WebSocket Streaming ASR connection error:", err);
-                startContinuousWebSpeechStream();
+                updateLiveIndicator(false, "Microphone stream disconnected");
             };
 
             return;
         } catch (err) {
-            console.warn("Streaming ASR start error, fallback to Continuous Web Speech API:", err);
-        }
-
-        // 2. Continuous Web Speech API Fallback Streaming
-        startContinuousWebSpeechStream();
-    }
-
-    function startContinuousWebSpeechStream() {
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRec) {
-            updateLiveIndicator(false, "Microphone stream unsupported on this browser");
-            return;
-        }
-
-        try {
-            speechRecognizer = new SpeechRec();
-            speechRecognizer.continuous = true;
-            speechRecognizer.interimResults = true;
-            speechRecognizer.lang = "en-US";
-
-            speechRecognizer.onstart = () => {
-                isSpeechRecognitionActive = true;
-                updateLiveIndicator(true, "Streaming Speech Engine Active");
-            };
-
-            speechRecognizer.onresult = (e) => {
-                if (isAudioPlaying || isAdvancing) return;
-
-                let interim = "";
-                let final = "";
-
-                for (let i = e.resultIndex; i < e.results.length; ++i) {
-                    const trans = e.results[i][0].transcript;
-                    if (e.results[i].isFinal) {
-                        final += trans;
-                    } else {
-                        interim += trans;
-                    }
-                }
-
-                const spoken = (final || interim).trim().toLowerCase();
-                if (spoken && !isAudioPlaying && !isAdvancing) {
-                    handleLiveTranscriptStream(spoken);
-                }
-            };
-
-            speechRecognizer.onerror = (e) => {
-                console.warn("Speech stream notice:", e.error);
-            };
-
-            speechRecognizer.onend = () => {
-                if (isStarted && !isAudioPlaying && currentStage <= 3) {
-                    try { speechRecognizer.start(); } catch(e) {}
-                }
-            };
-
-            if (!isAudioPlaying) {
-                speechRecognizer.start();
-            }
-        } catch (e) {
-            console.error("Continuous Speech Recognition init error:", e);
+            console.warn("Streaming ASR start error:", err);
+            updateLiveIndicator(false, "Microphone stream failed");
         }
     }
 

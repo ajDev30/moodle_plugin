@@ -17,12 +17,21 @@ if ($ADMIN->fulltree) {
         '<a class="btn btn-primary" href="' . $CFG->wwwroot . '/mod/readingassessment/admin.php">' . get_string('open_admin_dashboard', 'mod_readingassessment') . '</a>'
     ));
 
-    // OpenAI API Key
+    // Azure Speech API Key
     $settings->add(new admin_setting_configpasswordunmask(
-        'readingassessment/openai_apikey',
-        get_string('openai_apikey', 'mod_readingassessment'),
-        get_string('openai_apikey_help', 'mod_readingassessment'),
+        'readingassessment/azure_speech_key',
+        get_string('azure_speech_key', 'mod_readingassessment'),
+        get_string('azure_speech_key_help', 'mod_readingassessment'),
         ''
+    ));
+
+    // Azure Speech Region
+    $settings->add(new admin_setting_configtext(
+        'readingassessment/azure_speech_region',
+        get_string('azure_speech_region', 'mod_readingassessment'),
+        get_string('azure_speech_region_help', 'mod_readingassessment'),
+        'southeastasia',
+        PARAM_TEXT
     ));
 
     // Operating System Selection
@@ -43,7 +52,7 @@ if ($ADMIN->fulltree) {
         'readingassessment/service_port',
         get_string('service_port', 'mod_readingassessment'),
         get_string('service_port_help', 'mod_readingassessment'),
-        '8000',
+        '8010',
         PARAM_INT
     ));
 }

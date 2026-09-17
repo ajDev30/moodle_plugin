@@ -1,0 +1,147 @@
+================================================================================
+REFERENCES & SOURCE VERIFICATION LOG - CHAPTER 1
+Project: Voice-Based Reading Assessment System (ARAL Reading Program)
+Document: Buena.etal_Rev_Chapter1.docx
+================================================================================
+
+--------------------------------------------------------------------------------
+SECTION A: CHAPTER 1 LITERATURE & RRL REFERENCES (WITH VERIFICATION LINKS)
+--------------------------------------------------------------------------------
+
+1. Chen, Y. C., Chen, N. S., & Lin, Y. T. (2024). Integrating artificial intelligence and extended reality in language education: A systematic literature review (2017–2024). Education Sciences, 15(8), 1066.
+   Verification URL: https://doi.org/10.3390/educsci15081066
+
+2. Ludewig, U., Kleinkorres, R., Schaufelberger, R., & McElvany, N. (2022). The COVID-19 pandemic and student achievement in reading: A longitudinal analysis. Frontiers in Psychology, 13, 876485.
+   Verification URL: https://doi.org/10.3389/fpsyg.2022.876485
+
+3. Kuhfeld, M., Lewis, K., & Peltier, T. (2023). Reading achievement declines during the COVID-19 pandemic: Evidence from 5 million U.S. students. Educational Researcher.
+   Verification URL: https://doi.org/10.3102/0013189X231153112
+
+4. Hayati, H. A., & Puspitaloka, N. (2022). An analysis of students’ reading comprehension difficulties during the COVID-19 pandemic. Journal of English Teaching, 8(2), 123–134.
+   Verification URL: https://www.researchgate.net/publication/364464529
+
+5. Stanford Graduate School of Education. (2021). New Stanford study sheds light on how much learning young students have lost during stages of the pandemic.
+   Verification URL: https://ed.stanford.edu/news/new-stanford-study-sheds-light-how-much-learning-young-students-have-lost-during-stages
+
+6. Department of Education. (2024). Academic Recovery and Accessible Learning (ARAL) Program. Republic Act No. 12028.
+   Verification URL: https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/97912
+
+7. IBM. (n.d.). What is artificial intelligence (AI)? IBM Think Topics.
+   Verification URL: https://www.ibm.com/think/topics/artificial-intelligence
+
+8. Cambridge University Press & Assessment. (n.d.). Comprehension. Cambridge Dictionary.
+   Verification URL: https://dictionary.cambridge.org/dictionary/english/comprehension
+
+9. Power, D. J. (2007). A brief history of decision support systems. DSSResources.COM.
+   Verification URL: http://dssresources.com/history/dsshistory.html
+
+10. Microsoft Azure. (2025). Pronunciation assessment documentation and developer guide. Microsoft Learn.
+    Verification URL: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment
+
+11. Python Software Foundation. (2025). difflib — Helpers for computing deltas. Python 3 Documentation.
+    Verification URL: https://docs.python.org/3/library/difflib.html
+
+12. Witt, S. M., & Young, S. J. (2000). Phone-level pronunciation scoring and assessment for interactive language learning. Speech Communication, 30(2-3), 95-108.
+    Verification URL: https://doi.org/10.1016/S0167-6393(99)00044-8
+
+13. Microsoft Azure. (2024). Speech service overview: Speech-to-text and Neural Text-to-Speech. Microsoft Learn.
+    Verification URL: https://azure.microsoft.com/en-us/products/ai-services/speech-to-text
+
+14. TiloRes. (n.d.). Metaphone phonetic algorithm online tool.
+    Verification URL: https://tilores.io/metaphone-phonetic-algorithm-online-tool
+
+15. Cambridge University Press & Assessment. (n.d.). Pronunciation. Cambridge Dictionary.
+    Verification URL: https://dictionary.cambridge.org/dictionary/english/pronunciation
+
+16. E., Johnson, J., & William, B. (2025). Real-Time Feedback Systems in Assistive E-Learning: A Step Toward Inclusive Education. ResearchGate.
+    Verification URL: https://www.researchgate.net/publication/389891863_RealTime_Feedback_Systems_in_Assistive_E_Learning_A_Step_Toward_Inclusive_Education
+
+17. Hu, C., & Downie, A. (n.d.). What is speech-to-text? IBM Think.
+    Verification URL: https://www.ibm.com/think/topics/speech-to-text
+
+18. Cambridge University Press & Assessment. (n.d.). Voice recognition. Cambridge Dictionary.
+    Verification URL: https://dictionary.cambridge.org/dictionary/english/voice-recognition
+
+19. IBM. (n.d.). What is zero-shot learning? IBM Think.
+    Verification URL: https://www.ibm.com/think/topics/zero-shot-learning
+
+
+--------------------------------------------------------------------------------
+SECTION B: DEFINITION OF TERMS SOURCES & VERIFICATION LINKS
+--------------------------------------------------------------------------------
+
+1. ARAL Reading Program
+   Term: "ARAL Reading Program"
+   Source / Document: Department of Education / Republic Act No. 12028 (2024)
+   Verification URL: https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/97912
+
+2. Artificial Intelligence
+   Term: "Artificial Intelligence"
+   Source: IBM Think Topics (n.d.)
+   Verification URL: https://www.ibm.com/think/topics/artificial-intelligence
+
+3. Azure Speech SDK
+   Term: "Azure Speech SDK"
+   Source: Microsoft Azure Cognitive Services Documentation (2025)
+   Verification URL: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/overview
+
+4. Comprehension
+   Term: "Comprehension"
+   Source: Cambridge Dictionary (n.d.)
+   Verification URL: https://dictionary.cambridge.org/dictionary/english/comprehension
+
+5. Dialectal Accent
+   Term: "Dialectal Accent"
+   Source: Cambridge Dictionary & Phonetic Variations Literature
+   Verification URL: https://dictionary.cambridge.org/dictionary/english/dialect
+
+6. difflib (SequenceMatcher Algorithm)
+   Term: "difflib (SequenceMatcher Algorithm)"
+   Source: Python Software Foundation Standard Library Documentation (2025)
+   Verification URL: https://docs.python.org/3/library/difflib.html
+
+7. Goodness of Pronunciation (GOP) / Phoneme-level Assessment
+   Term: "Goodness of Pronunciation (GOP)"
+   Source: Microsoft Azure Pronunciation Assessment Guide & Witt & Young (2000)
+   Verification URL 1: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment
+   Verification URL 2: https://doi.org/10.1016/S0167-6393(99)00044-8
+
+8. Phonemes
+   Term: "Phonemes"
+   Source: Cambridge Dictionary (n.d.)
+   Verification URL: https://dictionary.cambridge.org/dictionary/english/phoneme
+
+9. Pronunciation
+   Term: "Pronunciation"
+   Source: Cambridge Dictionary (n.d.)
+   Verification URL: https://dictionary.cambridge.org/dictionary/english/pronunciation
+
+10. Reading Fluency
+    Term: "Reading Fluency"
+    Source: Philippine Informal Reading Inventory (Phil-IRI) Manual (DepEd)
+    Verification URL: https://www.deped.gov.ph/wp-content/uploads/2018/07/Phil-IRI-Manual-v3.pdf
+
+11. Real-Time Feedback
+    Term: "Real-Time Feedback"
+    Source: ResearchGate Assistive E-Learning Study (2025)
+    Verification URL: https://www.researchgate.net/publication/389891863_RealTime_Feedback_Systems_in_Assistive_E_Learning_A_Step_Toward_Inclusive_Education
+
+12. Speech-to-Text
+    Term: "Speech-to-Text"
+    Source: IBM Think Topics (n.d.)
+    Verification URL: https://www.ibm.com/think/topics/speech-to-text
+
+13. Text-to-Speech (TTS)
+    Term: "Text-to-Speech (TTS)"
+    Source: Microsoft Azure Neural Text-to-Speech Guide (2025)
+    Verification URL: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/text-to-speech
+
+14. Voice Recognition
+    Term: "Voice Recognition"
+    Source: Cambridge Dictionary (n.d.)
+    Verification URL: https://dictionary.cambridge.org/dictionary/english/voice-recognition
+
+15. Zero-shot
+    Term: "Zero-shot"
+    Source: IBM Think Topics (n.d.)
+    Verification URL: https://www.ibm.com/think/topics/zero-shot-learning

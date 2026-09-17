@@ -994,13 +994,13 @@ def compute_phonetic_similarity(w1: str, w2: str) -> float:
     if w1_clean == "the" and w2_clean in {"the", "thuh", "thee", "tha"}:
         return 1.0
     str_sim = max(
-        jellyfish.jaro_winkler_similarity(w1, w2),
-        jellyfish.jaro_winkler_similarity(w1_clean, w2_clean),
+        difflib.SequenceMatcher(None, w1, w2).ratio(),
+        difflib.SequenceMatcher(None, w1_clean, w2_clean).ratio(),
     )
-    m1 = jellyfish.metaphone(w1_clean)
-    m2 = jellyfish.metaphone(w2_clean)
+    m1 = jellyfish.metaphone(w1_clean) if hasattr(jellyfish, 'metaphone') else w1_clean
+    m2 = jellyfish.metaphone(w2_clean) if hasattr(jellyfish, 'metaphone') else w2_clean
     if m1 and m2:
-        meta_sim = 1.0 if m1 == m2 else jellyfish.jaro_winkler_similarity(m1, m2)
+        meta_sim = 1.0 if m1 == m2 else difflib.SequenceMatcher(None, m1, m2).ratio()
         return round(min(1.0, max(0.0, (str_sim * 0.6) + (meta_sim * 0.4))), 4)
     return round(str_sim, 4)
 
@@ -1195,13 +1195,34 @@ async def progressive_blend_steps_endpoint(payload: Dict[str, Any]):
 # AZURE TTS — replaces OpenAI TTS
 # ============================================================
 
+LEGACY_VOICE_MAP = {
+    "alloy": "en-US-JennyNeural",
+    "nova": "en-US-JennyNeural",
+    "shimmer": "en-US-AriaNeural",
+    "sage": "en-US-JennyNeural",
+    "coral": "en-US-AriaNeural",
+    "ash": "en-US-JennyNeural",
+    "ballad": "en-US-JennyNeural",
+    "echo": "en-US-GuyNeural",
+    "fable": "en-GB-SoniaNeural",
+    "onyx": "en-US-GuyNeural",
+    "verse": "en-US-JennyNeural",
+    "marin": "en-US-JennyNeural",
+    "cedar": "en-US-GuyNeural",
+}
+
 async def _azure_tts_speak(text: str, voice: str = "en-US-JennyNeural") -> Optional[bytes]:
     """Synthesize text to MP3 bytes using Azure TTS (Neural voice)."""
     if not AZURE_KEY or not AZURE_SDK_AVAILABLE:
         return None
     try:
+        voice_clean = (voice or "").strip()
+        voice_target = LEGACY_VOICE_MAP.get(voice_clean.lower(), voice_clean)
+        if not voice_target or "Neural" not in voice_target:
+            voice_target = "en-US-JennyNeural"
+
         speech_config = speechsdk.SpeechConfig(subscription=AZURE_KEY, region=AZURE_REGION)
-        speech_config.speech_synthesis_voice_name = voice
+        speech_config.speech_synthesis_voice_name = voice_target
         speech_config.set_speech_synthesis_output_format(
             speechsdk.SpeechSynthesisOutputFormat.Audio16Khz32KBitRateMonoMp3
         )
@@ -1315,7 +1336,7 @@ async def phonics_letter_eval_endpoint(payload: Dict[str, Any]):
     if not matched:
         for token in spoken_tokens:
             for ph in allowed_phonemes:
-                if jellyfish.jaro_winkler_similarity(token, ph) >= 0.80:
+                if difflib.SequenceMatcher(None, token, ph).ratio() >= 0.80:
                     matched       = True
                     matched_token = token
                     break

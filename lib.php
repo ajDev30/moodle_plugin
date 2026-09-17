@@ -42,8 +42,8 @@ function readingassessment_add_instance($data, $mform = null) {
     if (!isset($data->activitytype)) {
         $data->activitytype = 'assessment';
     }
-    if (!isset($data->tts_voice)) {
-        $data->tts_voice = 'alloy';
+    if (!isset($data->tts_voice) || $data->tts_voice === 'alloy') {
+        $data->tts_voice = 'en-US-JennyNeural';
     }
     $data->mastery_repetitions = !empty($data->mastery_repetitions) ? intval($data->mastery_repetitions) : 2;
     $data->linked_quizid = 0;
@@ -100,8 +100,8 @@ function readingassessment_update_instance($data, $mform = null) {
     if (!isset($data->activitytype)) {
         $data->activitytype = 'assessment';
     }
-    if (!isset($data->tts_voice)) {
-        $data->tts_voice = 'alloy';
+    if (!isset($data->tts_voice) || $data->tts_voice === 'alloy') {
+        $data->tts_voice = 'en-US-JennyNeural';
     }
     if (!isset($data->tts_personality_prompt)) {
         $data->tts_personality_prompt = '';
@@ -210,51 +210,160 @@ function readingassessment_update_grades($readingassessment, $userid = 0, $nulli
 }
 
 /**
- * Extends course navigation to link to ARAL Program: Student Reading Progress.
- *
- * @param navigation_node $parentnode The parent navigation node.
- * @param stdClass $course The course object.
- * @param context_course $context The course context.
+ * Self-healing database schema verification.
  */
-function readingassessment_extend_navigation_course(navigation_node $parentnode, stdClass $course, context_course $context) {
+function readingassessment_ensure_schema() {
     global $DB;
+    $dbman = $DB->get_manager();
 
-    if (has_capability('mod/readingassessment:grade', $context)) {
-        $ra_count = $DB->count_records('readingassessment', ['course' => $course->id]);
-        if ($ra_count > 0) {
-            $url = new moodle_url('/mod/readingassessment/report.php', ['courseid' => $course->id]);
-            $parentnode->add(
-                get_string('aral_reading_progress', 'mod_readingassessment'),
-                $url,
-                navigation_node::TYPE_CUSTOM,
-                null,
-                'aral_reading_progress',
-                new pix_icon('i/report', '')
-            );
-        }
+    $table_ra = new xmldb_table('readingassessment');
+    $field_voice = new xmldb_field('tts_voice', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, 'en-US-JennyNeural', 'activitytype');
+    if ($dbman->field_exists($table_ra, $field_voice)) {
+        $dbman->change_field_precision($table_ra, $field_voice);
+    }
+
+    $field_mastery = new xmldb_field('mastery_repetitions', XMLDB_TYPE_INTEGER, '4', null, XMLDB_NOTNULL, null, '2', 'tts_voice');
+    if (!$dbman->field_exists($table_ra, $field_mastery)) {
+        $dbman->add_field($table_ra, $field_mastery);
+    }
+    $field_nr = new xmldb_field('nonreader_data', XMLDB_TYPE_TEXT, null, null, null, null, null, 'questions_json');
+    if (!$dbman->field_exists($table_ra, $field_nr)) {
+        $dbman->add_field($table_ra, $field_nr);
+    }
+    $field_personality = new xmldb_field('tts_personality_prompt', XMLDB_TYPE_TEXT, null, null, null, null, null, 'tts_voice');
+    if (!$dbman->field_exists($table_ra, $field_personality)) {
+        $dbman->add_field($table_ra, $field_personality);
+    }
+
+    $table_att = new xmldb_table('readingassessment_attempts');
+    $field_time = new xmldb_field('reading_time', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'final_grade');
+    if (!$dbman->field_exists($table_att, $field_time)) {
+        $dbman->add_field($table_att, $field_time);
+    }
+    $field_speed = new xmldb_field('reading_speed', XMLDB_TYPE_NUMBER, '10, 2', null, XMLDB_NOTNULL, null, '0.00', 'reading_time');
+    if (!$dbman->field_exists($table_att, $field_speed)) {
+        $dbman->add_field($table_att, $field_speed);
     }
 }
 
 /**
- * Extends settings navigation for reading assessment activity.
+ * Render custom comprehension questions cleanly.
+ *
+ * @param array $custom_questions
+ * @param string $form_id
+ * @param string $button_id
+ * @return string HTML output
  */
-function readingassessment_extend_settings_navigation(settings_navigation $settingsnav, navigation_node $readingassessmentnode = null) {
-    global $PAGE;
-
-    if (has_capability('mod/readingassessment:grade', $PAGE->cm->context)) {
-        $url = new moodle_url('/mod/readingassessment/report.php', [
-            'id' => $PAGE->cm->id,
-            'courseid' => $PAGE->cm->course
-        ]);
-        if ($readingassessmentnode) {
-            $readingassessmentnode->add(
-                get_string('aral_reading_progress', 'mod_readingassessment'),
-                $url,
-                navigation_node::TYPE_CUSTOM,
-                null,
-                'aral_reading_progress',
-                new pix_icon('i/report', '')
-            );
-        }
+function readingassessment_render_questions(array $custom_questions, string $form_id = 'ra-quiz-form', string $button_id = 'ra-btn-submit') {
+    if (empty($custom_questions)) {
+        return '
+        <div class="ra-quiz-submit-container">
+            <button id="' . $button_id . '" class="ra-btn ra-btn-submit">
+                <span>📤</span> Submit Reading Assessment
+            </button>
+        </div>';
     }
+
+    $html = '<div class="ra-card ra-quiz-card">';
+    $html .= '<div class="ra-card-title">📝 Comprehension & Reflection Questions</div>';
+    $html .= '<p class="ra-quiz-intro">Please complete the items below based on the reading passage:</p>';
+    $html .= '<form id="' . $form_id . '">';
+
+    foreach ($custom_questions as $qidx => $q) {
+        $type = $q['type'] ?? 'multichoice';
+        $html .= '<div class="ra-question-item">';
+
+        if ($type === 'description') {
+            $html .= '<div class="ra-question-description">';
+            $html .= '<div class="ra-q-desc-title">' . s($q['title'] ?? 'Instructions') . '</div>';
+            $html .= '<div class="ra-q-desc-text">' . nl2br(s($q['question'] ?? '')) . '</div>';
+            $html .= '</div>';
+
+        } else if ($type === 'multichoice') {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            if (!empty($q['options'])) {
+                $html .= '<div class="ra-options-stack">';
+                foreach ($q['options'] as $oidx => $opt) {
+                    $html .= '<label class="ra-option-label">';
+                    $html .= '<input type="radio" name="ra_q_' . $qidx . '" value="' . $oidx . '">';
+                    $html .= '<span><strong>' . chr(65 + $oidx) . '.</strong> ' . s($opt) . '</span>';
+                    $html .= '</label>';
+                }
+                $html .= '</div>';
+            }
+
+        } else if ($type === 'truefalse') {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<div class="ra-options-inline">';
+            $html .= '<label class="ra-option-label ra-tf-true">';
+            $html .= '<input type="radio" name="ra_q_' . $qidx . '" value="true">';
+            $html .= '<span>True</span>';
+            $html .= '</label>';
+            $html .= '<label class="ra-option-label ra-tf-false">';
+            $html .= '<input type="radio" name="ra_q_' . $qidx . '" value="false">';
+            $html .= '<span>False</span>';
+            $html .= '</label>';
+            $html .= '</div>';
+
+        } else if ($type === 'matching' || $type === 'randommatch') {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? 'Match the items:') . '</div>';
+            $pairs = $q['pairs'] ?? [];
+            $all_answers = array_filter(array_map(function($p) { return $p['answer'] ?? ''; }, $pairs));
+            shuffle($all_answers);
+            $html .= '<div class="ra-matching-stack">';
+            foreach ($pairs as $pidx => $p) {
+                $html .= '<div class="ra-matching-row">';
+                $html .= '<span class="ra-matching-q">' . s($p['question'] ?? '') . '</span>';
+                $html .= '<select name="ra_q_' . $qidx . '_p_' . $pidx . '" class="ra-matching-select">';
+                $html .= '<option value="">-- Choose matching answer --</option>';
+                foreach ($all_answers as $ans_opt) {
+                    $html .= '<option value="' . s($ans_opt) . '">' . s($ans_opt) . '</option>';
+                }
+                $html .= '</select>';
+                $html .= '</div>';
+            }
+            $html .= '</div>';
+
+        } else if ($type === 'shortanswer' || $type === 'numerical' || $type === 'calculated' || $type === 'calculatedsimple' || $type === 'calculatedmulti') {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<input type="text" name="ra_q_' . $qidx . '" placeholder="Type your answer here..." class="ra-input-text">';
+
+        } else if ($type === 'essay') {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<textarea name="ra_q_' . $qidx . '" rows="4" placeholder="Write your essay response here..." class="ra-textarea"></textarea>';
+
+        } else if ($type === 'ordering') {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? 'Arrange in order:') . '</div>';
+            $items = $q['items'] ?? [];
+            $shuffled_items = $items;
+            shuffle($shuffled_items);
+            $html .= '<div class="ra-ordering-stack">';
+            foreach ($shuffled_items as $iidx => $it) {
+                $html .= '<div class="ra-ordering-row">';
+                $html .= '<select name="ra_q_' . $qidx . '_ord_' . $iidx . '" class="ra-ordering-select">';
+                for ($s = 1; $s <= count($shuffled_items); $s++) {
+                    $html .= '<option value="' . $s . '">' . $s . '</option>';
+                }
+                $html .= '</select>';
+                $html .= '<span data-itemtext="' . s($it) . '">' . s($it) . '</span>';
+                $html .= '</div>';
+            }
+            $html .= '</div>';
+
+        } else {
+            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<input type="text" name="ra_q_' . $qidx . '" placeholder="Your response..." class="ra-input-text">';
+        }
+
+        $html .= '</div>';
+    }
+
+    $html .= '</form>';
+    $html .= '<div class="ra-quiz-submit-container">';
+    $html .= '<button id="' . $button_id . '" class="ra-btn ra-btn-submit"><span>📤</span> Submit Assessment</button>';
+    $html .= '</div>';
+    $html .= '</div>';
+
+    return $html;
 }
+

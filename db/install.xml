@@ -12,7 +12,7 @@
         <FIELD NAME="intro" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
         <FIELD NAME="introformat" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>
         <FIELD NAME="activitytype" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="assessment" SEQUENCE="false"/>
-        <FIELD NAME="tts_voice" TYPE="char" LENGTH="20" NOTNULL="true" DEFAULT="alloy" SEQUENCE="false"/>
+        <FIELD NAME="tts_voice" TYPE="char" LENGTH="64" NOTNULL="true" DEFAULT="en-US-JennyNeural" SEQUENCE="false"/>
         <FIELD NAME="mastery_repetitions" TYPE="int" LENGTH="4" NOTNULL="true" DEFAULT="2" SEQUENCE="false"/>
         <FIELD NAME="passage" TYPE="text" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="questions_json" TYPE="text" NOTNULL="false" SEQUENCE="false"/>
