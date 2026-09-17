@@ -71,5 +71,89 @@ function xmldb_readingassessment_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2024081404, 'readingassessment');
     }
 
+    if ($oldversion < 2024091705) {
+        $table = new xmldb_table('readingassessment_ext_pass');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('grade_level', XMLDB_TYPE_INTEGER, '4', null, XMLDB_NOTNULL, null, '7');
+        $table->add_field('passage', XMLDB_TYPE_TEXT, null, null, XMLDB_NOTNULL, null, null);
+        $table->add_field('questions_json', XMLDB_TYPE_TEXT, null, null, null, null, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('grade_level', XMLDB_INDEX_UNIQUE, ['grade_level']);
+
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        $table = new xmldb_table('readingassessment_ext_prof');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('token', XMLDB_TYPE_CHAR, '64', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('fullname', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('lrn', XMLDB_TYPE_CHAR, '50', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('grade_level', XMLDB_TYPE_INTEGER, '4', null, XMLDB_NOTNULL, null, '7');
+        $table->add_field('consent_agreed', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_index('token', XMLDB_INDEX_UNIQUE, ['token']);
+
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        $table = new xmldb_table('readingassessment_ext_att');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('profileid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('transcript', XMLDB_TYPE_TEXT, null, null, null, null, null);
+        $table->add_field('accuracy_score', XMLDB_TYPE_NUMBER, '10, 2', null, XMLDB_NOTNULL, null, '0.00');
+        $table->add_field('comprehension_score', XMLDB_TYPE_NUMBER, '10, 2', null, XMLDB_NOTNULL, null, '0.00');
+        $table->add_field('reading_time', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_field('reading_speed', XMLDB_TYPE_NUMBER, '10, 2', null, XMLDB_NOTNULL, null, '0.00');
+        $table->add_field('miscues_json', XMLDB_TYPE_TEXT, null, null, null, null, null);
+        $table->add_field('answers_json', XMLDB_TYPE_TEXT, null, null, null, null, null);
+        $table->add_field('classification', XMLDB_TYPE_CHAR, '50', null, null, null, null);
+        $table->add_field('timecompleted', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0');
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_key('profileid', XMLDB_KEY_FOREIGN, ['profileid'], 'readingassessment_ext_prof', ['id']);
+
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2024091705, 'readingassessment');
+    }
+
+    if ($oldversion < 2024091706) {
+        $table = new xmldb_table('readingassessment_ext_pass');
+        
+        $field_exp = new xmldb_field('expiration_time', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'questions_json');
+        if (!$dbman->field_exists($table, $field_exp)) {
+            $dbman->add_field($table, $field_exp);
+        }
+
+        $field_att = new xmldb_field('max_attempts', XMLDB_TYPE_INTEGER, '4', null, XMLDB_NOTNULL, null, '1', 'expiration_time');
+        if (!$dbman->field_exists($table, $field_att)) {
+            $dbman->add_field($table, $field_att);
+        }
+
+        upgrade_mod_savepoint(true, 2024091706, 'readingassessment');
+    }
+
+    if ($oldversion < 2024091707) {
+        $table = new xmldb_table('readingassessment_ext_prof');
+        
+        $field_gender = new xmldb_field('gender', XMLDB_TYPE_CHAR, '20', null, null, null, null, 'lrn');
+        if (!$dbman->field_exists($table, $field_gender)) {
+            $dbman->add_field($table, $field_gender);
+        }
+
+        $field_age = new xmldb_field('age', XMLDB_TYPE_INTEGER, '3', null, null, null, null, 'gender');
+        if (!$dbman->field_exists($table, $field_age)) {
+            $dbman->add_field($table, $field_age);
+        }
+
+        upgrade_mod_savepoint(true, 2024091707, 'readingassessment');
+    }
+
     return true;
 }

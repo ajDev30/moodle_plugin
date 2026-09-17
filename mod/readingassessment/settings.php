@@ -17,6 +17,13 @@ if ($ADMIN->fulltree) {
         '<a class="btn btn-primary" href="' . $CFG->wwwroot . '/mod/readingassessment/admin.php">' . get_string('open_admin_dashboard', 'mod_readingassessment') . '</a>'
     ));
 
+    // Link to External Screening Dashboard
+    $settings->add(new admin_setting_heading(
+        'readingassessment_ext_dash_heading',
+        'External Screening Dashboard',
+        '<a class="btn btn-success" href="' . $CFG->wwwroot . '/mod/readingassessment/external_manage.php">Open External Screening Dashboard</a>'
+    ));
+
     // Azure Speech API Key
     $settings->add(new admin_setting_configpasswordunmask(
         'readingassessment/azure_speech_key',

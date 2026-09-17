@@ -283,10 +283,16 @@ function readingassessment_render_questions(array $custom_questions, string $for
             $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
             if (!empty($q['options'])) {
                 $html .= '<div class="ra-options-stack">';
-                foreach ($q['options'] as $oidx => $opt) {
+                $opts_to_render = $q['options'];
+                $keys = array_keys($opts_to_render);
+                if (!empty($q['shuffle'])) {
+                    shuffle($keys);
+                }
+                foreach ($keys as $display_idx => $original_oidx) {
+                    $opt = $opts_to_render[$original_oidx];
                     $html .= '<label class="ra-option-label">';
-                    $html .= '<input type="radio" name="ra_q_' . $qidx . '" value="' . $oidx . '">';
-                    $html .= '<span><strong>' . chr(65 + $oidx) . '.</strong> ' . s($opt) . '</span>';
+                    $html .= '<input type="radio" name="ra_q_' . $qidx . '" value="' . $original_oidx . '">';
+                    $html .= '<span><strong>' . chr(65 + $display_idx) . '.</strong> ' . s($opt) . '</span>';
                     $html .= '</label>';
                 }
                 $html .= '</div>';
