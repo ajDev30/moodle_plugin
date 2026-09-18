@@ -68,7 +68,7 @@ $total_profiles = $DB->count_records('readingassessment_ext_prof');
 $total_attempts = $DB->count_records('readingassessment_ext_att');
 
 // Recent attempts
-$sql = "SELECT att.id, prof.fullname, prof.lrn, prof.gender, prof.age, prof.grade_level, pass.title AS passage_title, att.accuracy_score, att.comprehension_score, att.classification, att.timecompleted, att.level_idx 
+$sql = "SELECT att.id, prof.fullname, prof.lrn, prof.gender, prof.age, prof.grade_level, pass.title AS passage_title, pass.questions_json, att.accuracy_score, att.comprehension_score, att.classification, att.timecompleted, att.level_idx, att.answers_json, att.miscues_json 
         FROM {readingassessment_ext_att} att
         JOIN {readingassessment_ext_prof} prof ON att.profileid = prof.id
         LEFT JOIN {readingassessment_ext_pass} pass ON prof.grade_level = pass.id
@@ -183,7 +183,7 @@ $recent_attempts = $DB->get_records_sql($sql);
                                                 </span>
                                             </td>
                                             <td>
-                                                <button class="btn btn-sm btn-outline-primary" onclick="viewAnswers(<?php echo $att->id; ?>)">View</button>
+                                                <button class="btn btn-sm btn-outline-primary" onclick="viewAnswers(this)" data-answers="<?php echo s($att->answers_json); ?>" data-questions="<?php echo s($att->questions_json); ?>" data-miscues="<?php echo s($att->miscues_json); ?>" data-student="<?php echo s($att->fullname); ?>">View</button>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -202,13 +202,13 @@ $recent_attempts = $DB->get_records_sql($sql);
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Student Submission</h5>
+        <h5 class="modal-title">Student Submission: <span id="modalStudentName"></span></h5>
         <button type="button" class="close" data-dismiss="modal" aria-label="Close">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
-      <div class="modal-body">
-        <p class="text-muted">Currently, to view detailed answers for manual grading (Essay/Short Answer), please check the database for now while the grading UI is being finalized.</p>
+      <div class="modal-body" id="modalAnswersBody">
+        <p class="text-muted">Loading...</p>
       </div>
     </div>
   </div>
@@ -223,7 +223,92 @@ function copyLink() {
     alert("Copied link: " + copyText.value);
 }
 
-function viewAnswers(id) {
+function viewAnswers(btn) {
+    const student = btn.getAttribute('data-student');
+    const answersRaw = btn.getAttribute('data-answers');
+    const questionsRaw = btn.getAttribute('data-questions');
+    
+    document.getElementById('modalStudentName').textContent = student;
+    const body = document.getElementById('modalAnswersBody');
+    
+    try {
+        const answers = JSON.parse(answersRaw || '{}');
+        const questions = JSON.parse(questionsRaw || '[]');
+        
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+        
+        let html = '<h6 class="font-weight-bold mb-3">Comprehension Answers</h6>';
+        
+        if (Object.keys(answers).length === 0) {
+            html += '<p class="text-muted">No answers recorded.</p>';
+        } else {
+            html += '<table class="table table-bordered table-sm">';
+            html += '<thead class="thead-light"><tr><th style="width: 40%">Question</th><th>Student\'s Answer</th><th>Status</th></tr></thead><tbody>';
+            for (const [qIdx, ans] of Object.entries(answers)) {
+                let displayAns = ans;
+                let questionText = `Question ${parseInt(qIdx) + 1}`;
+                let statusHtml = '-';
+                
+                const q = questions[qIdx];
+                if (q) {
+                    questionText = q.question || questionText;
+                    
+                    if (q.type === 'multichoice') {
+                        let optIdx = parseInt(ans);
+                        if (q.options && q.options[optIdx] !== undefined) {
+                            displayAns = q.options[optIdx];
+                        }
+                        if (optIdx === parseInt(q.correct)) {
+                            statusHtml = '<span class="badge badge-success">Correct</span>';
+                        } else {
+                            statusHtml = '<span class="badge badge-danger">Incorrect</span>';
+                        }
+                    } else if (q.type === 'truefalse') {
+                        let boolAns = (ans === 'true' || ans === true);
+                        displayAns = boolAns ? "True" : "False";
+                        let boolCorrect = (q.correct === 'true' || q.correct === true);
+                        if (boolAns === boolCorrect) {
+                            statusHtml = '<span class="badge badge-success">Correct</span>';
+                        } else {
+                            statusHtml = '<span class="badge badge-danger">Incorrect</span>';
+                        }
+                    } else if (q.type === 'matching') {
+                        if (typeof ans === 'object') {
+                            displayAns = "<ul>";
+                            let allCorrect = true;
+                            for (const [pIdx, matchVal] of Object.entries(ans)) {
+                                displayAns += `<li>Match ${parseInt(pIdx)+1}: ${escapeHtml(matchVal)}</li>`;
+                                if (q.pairs && q.pairs[pIdx]) {
+                                    if (matchVal !== q.pairs[pIdx].answer) {
+                                        allCorrect = false;
+                                    }
+                                }
+                            }
+                            displayAns += "</ul>";
+                            statusHtml = allCorrect ? '<span class="badge badge-success">Correct</span>' : '<span class="badge badge-warning">Partial/Incorrect</span>';
+                        }
+                    } else if (q.type === 'shortanswer' || q.type === 'essay') {
+                        statusHtml = '<span class="badge badge-secondary">Manual Grade</span>';
+                    }
+                }
+                
+                // If it's matching, displayAns already has HTML. Otherwise escape it.
+                if (q && q.type === 'matching') {
+                    html += `<tr><td><small>${escapeHtml(questionText)}</small></td><td>${displayAns}</td><td>${statusHtml}</td></tr>`;
+                } else {
+                    html += `<tr><td><small>${escapeHtml(questionText)}</small></td><td><strong>${escapeHtml(displayAns)}</strong></td><td>${statusHtml}</td></tr>`;
+                }
+            }
+            html += '</tbody></table>';
+        }
+        
+        body.innerHTML = html;
+    } catch(e) {
+        body.innerHTML = '<p class="text-danger">Error parsing answers.</p>';
+    }
+    
     $('#answersModal').modal('show');
 }
 </script>
