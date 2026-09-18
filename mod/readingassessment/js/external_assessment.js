@@ -86,6 +86,9 @@ window.ExternalReadingAssessment = (function() {
         if (card) card.style.display = "none";
         
         isIsolatedMode = false;
+        if (mainAudioRecorder && mainAudioRecorder.state === 'paused') {
+            mainAudioRecorder.resume();
+        }
         
         if (coachWs) {
             try { coachWs.close(); } catch(e){}
@@ -118,6 +121,9 @@ window.ExternalReadingAssessment = (function() {
         }
 
         isIsolatedMode = true;
+        if (mainAudioRecorder && mainAudioRecorder.state === 'recording') {
+            mainAudioRecorder.pause();
+        }
         isCoachSpeaking = true;
         currentCoachWord = targetWord;
         cachedCoachAudio = null;
@@ -646,24 +652,55 @@ window.ExternalReadingAssessment = (function() {
                                                 err = "Mispronunciation";
                                             }
 
-                                            const wordText = wr.word || "";
-                                            const passageIdx = wr.passage_idx !== undefined && wr.passage_idx !== null ? wr.passage_idx : idx;
+                                            let cleanWord = wordText.toLowerCase().replace(/[^\w]/g, "");
+                                            let passageIdx = -1;
                                             
-                                            if (err === "None") {
-                                                if (passageIdx === currentPassageIndex) {
-                                                    const s = document.getElementById(`ra-ext-word-${passageIdx}`);
-                                                    if (s) {
-                                                        s.style.backgroundColor = "#e0f2fe"; 
-                                                        s.style.color = "#0369a1";
-                                                    }
-                                                    currentPassageIndex = passageIdx + 1;
-                                                    resetCoachTimer();
-                                                    if (ws && ws.readyState === WebSocket.OPEN) {
-                                                        ws.send(JSON.stringify({ type: "sync_index", index: currentPassageIndex }));
+                                            // Sliding window: first search forwards (up to 8 words)
+                                            for(let offset=0; offset<8; offset++){
+                                                let checkIdx = currentPassageIndex + offset;
+                                                if(checkIdx < passageTokens.length){
+                                                    let cleanPassage = passageTokens[checkIdx].toLowerCase().replace(/[^\w]/g, "");
+                                                    if(cleanPassage === cleanWord){
+                                                        passageIdx = checkIdx;
+                                                        break;
                                                     }
                                                 }
-                                                // If they successfully read the word in the same chunk sequentially, clear any stutter flag for it!
-                                                if (foundMispronunciationIdx === passageIdx && passageIdx === currentPassageIndex - 1) {
+                                            }
+                                            
+                                            // If not found forward, search backwards (up to 15 words) in case they restarted a sentence
+                                            if (passageIdx === -1) {
+                                                for(let offset=1; offset<=15; offset++){
+                                                    let checkIdx = currentPassageIndex - offset;
+                                                    if(checkIdx >= 0){
+                                                        let cleanPassage = passageTokens[checkIdx].toLowerCase().replace(/[^\w]/g, "");
+                                                        if(cleanPassage === cleanWord){
+                                                            passageIdx = checkIdx;
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if(passageIdx === -1){
+                                                passageIdx = currentPassageIndex; 
+                                            } else {
+                                                // Advance currentPassageIndex to the matched word's index + 1
+                                                currentPassageIndex = passageIdx + 1;
+                                            }
+                                            
+                                            if (err === "None") {
+                                                const s = document.getElementById(`ra-ext-word-${passageIdx}`);
+                                                if (s) {
+                                                    s.style.backgroundColor = "#e0f2fe"; 
+                                                    s.style.color = "#0369a1";
+                                                }
+                                                resetCoachTimer();
+                                                if (ws && ws.readyState === WebSocket.OPEN) {
+                                                    ws.send(JSON.stringify({ type: "sync_index", index: currentPassageIndex }));
+                                                }
+                                                
+                                                // Clear stutter flag if they eventually got it right
+                                                if (foundMispronunciationIdx === passageIdx) {
                                                     foundMispronunciationIdx = -1;
                                                 }
                                             }
@@ -775,12 +812,15 @@ window.ExternalReadingAssessment = (function() {
                                         
                                         // Collect the exact final Omissions, Insertions, etc for the backend!
                                         const finalWords = msg.word_results || [];
+                                        heldEvaluationData.word_results = finalWords;
+                                        
                                         let miscuesArr = [];
                                         finalWords.forEach((wr, idx) => {
                                             const et = wr.error_type || "None";
                                             if (et !== "None") {
                                                 miscuesArr.push({
-                                                    word: wr.word,
+                                                    word: wr.word || "",
+                                                    spoken_word: wr.spoken_word || "",
                                                     error_type: et,
                                                     accuracy_score: wr.accuracy_score || 0
                                                 });

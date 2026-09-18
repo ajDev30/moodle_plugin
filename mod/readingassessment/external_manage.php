@@ -176,6 +176,7 @@ $recent_attempts = $DB->get_records_sql($sql);
                                                     data-answers="<?php echo s($att->answers_json); ?>" 
                                                     data-questions="<?php echo s($att->questions_json); ?>" 
                                                     data-miscues="<?php echo s($att->miscues_json); ?>" 
+                                                    data-evaluation="<?php echo s($att->evaluation_data ?? '{}'); ?>" 
                                                     data-student="<?php echo s($att->fullname); ?>"
                                                     data-passage="<?php echo s($passage_text); ?>"
                                                     data-attid="<?php echo $att->id; ?>"
@@ -308,45 +309,67 @@ function viewAnswers(btn) {
         html += '<hr><h6 class="font-weight-bold mb-3 mt-4">🗣️ Phil-IRI Pronunciation & Miscue Analysis</h6>';
         html += `<div class="mb-3"><audio controls src="serve_audio.php?id=${attId}" style="width: 100%; height: 40px;"></audio></div>`;
         
+        const evaluationDataRaw = btn.getAttribute('data-evaluation');
+        let evaluationData = null;
+        try { evaluationData = JSON.parse(evaluationDataRaw || '{}'); } catch(e) {}
+        
         if (!passageText) {
             html += '<p class="text-muted">No passage text available.</p>';
         } else {
             // Phil-IRI Marked Passage
             html += '<div class="card bg-light mb-3"><div class="card-body" style="font-size: 1.15rem; line-height: 2.2;">';
-            html += '<h6 class="text-secondary border-bottom pb-2 mb-3">Marked Passage Text</h6>';
-            
-            let words = passageText.split(/\s+/);
-            // Match with miscues (assuming miscues contains {word, errorType})
-            // We use a simple pointer to align words if miscues array matches passage order
-            // Azure usually returns them in order of the reference text
-            let mIdx = 0;
+            html += '<h6 class="text-secondary border-bottom pb-2 mb-3">Marked Passage Text (Phil-IRI Rules)</h6>';
             
             let markedHtml = '';
-            for (let i = 0; i < words.length; i++) {
-                let w = words[i];
-                if (!w.trim()) continue;
-                
-                let cleanW = w.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'?!]/g,"");
-                let isMis = false;
-                let isOmi = false;
-                
-                // Find matching miscue for this word
-                for(let k=0; k < miscues.length; k++) {
-                    if (miscues[k].word && miscues[k].word.toLowerCase() === cleanW) {
-                        if (miscues[k].errorType === 'Mispronunciation') isMis = true;
-                        if (miscues[k].errorType === 'Omission') isOmi = true;
-                        break;
+            
+            if (evaluationData && evaluationData.word_results && evaluationData.word_results.length > 0) {
+                // Use perfectly aligned SequenceMatcher word results from backend!
+                evaluationData.word_results.forEach(wObj => {
+                    const et = wObj.error_type || "None";
+                    const wText = escapeHtml(wObj.word || "");
+                    
+                    if (et === "Omission") {
+                        markedHtml += `<span style="border: 2px solid #ef4444; border-radius: 50%; padding: 0 4px; margin: 0 2px; color: #ef4444; font-weight: bold;">${wText}</span> `;
+                    } else if (et === "Mispronunciation") {
+                        let spoken = wObj.spoken_word ? escapeHtml(wObj.spoken_word) : "(mis)";
+                        markedHtml += `<span style="display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; line-height:1;"><sup style="color:#d97706; font-size:0.7em; font-weight:bold;">${spoken}</sup><span style="text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-thickness: 3px; color: #b45309; font-weight: bold;">${wText}</span></span> `;
+                    } else if (et === "Substitution") {
+                        let spoken = wObj.spoken_word ? escapeHtml(wObj.spoken_word) : "(sub)";
+                        markedHtml += `<span style="display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; line-height:1;"><sup style="color:#2563eb; font-size:0.7em; font-weight:bold;">${spoken}</sup><span style="color: #1d4ed8; font-weight: bold;">${wText}</span></span> `;
+                    } else if (et === "Insertion") {
+                        markedHtml += `<span style="display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; line-height:1; margin-right: 4px;"><sup style="color:#16a34a; font-size:0.7em; font-weight:bold;">${wText}</sup><span style="color: #16a34a; font-weight: bold; font-size: 1.2em;">^</span></span>`;
+                    } else {
+                        markedHtml += `${wText} `;
+                    }
+                });
+            } else {
+                let words = passageText.split(/\s+/);
+                for (let i = 0; i < words.length; i++) {
+                    let w = words[i];
+                    if (!w.trim()) continue;
+                    
+                    let cleanW = w.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'?!]/g,"");
+                    let isMis = false;
+                    let isOmi = false;
+                    
+                    for(let k=0; k < miscues.length; k++) {
+                        if (miscues[k].word && miscues[k].word.toLowerCase() === cleanW) {
+                            if (miscues[k].errorType === 'Mispronunciation') isMis = true;
+                            if (miscues[k].errorType === 'Omission') isOmi = true;
+                            break;
+                        }
+                    }
+                    
+                    if (isOmi) {
+                        markedHtml += `<span style="border: 2px solid #ef4444; border-radius: 50%; padding: 0 4px; margin: 0 2px; color: #ef4444; font-weight: bold;">${w}</span> `;
+                    } else if (isMis) {
+                        markedHtml += `<span style="text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-thickness: 3px; color: #b45309; font-weight: bold;">${w}</span><sup style="color: #f59e0b;">(mis)</sup> `;
+                    } else {
+                        markedHtml += `${w} `;
                     }
                 }
-                
-                if (isOmi) {
-                    markedHtml += `<span style="border: 2px solid #ef4444; border-radius: 50%; padding: 0 4px; margin: 0 2px; color: #ef4444; font-weight: bold;">${w}</span> `;
-                } else if (isMis) {
-                    markedHtml += `<span style="text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-thickness: 3px; color: #b45309; font-weight: bold;">${w}</span><sup style="color: #f59e0b;">(mis)</sup> `;
-                } else {
-                    markedHtml += `${w} `;
-                }
             }
+            
             html += markedHtml;
             html += '</div></div>';
             
