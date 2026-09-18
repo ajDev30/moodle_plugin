@@ -31,7 +31,7 @@ if (!$record) {
 }
 
 if ($action === 'save' && data_submitted() && confirm_sesskey()) {
-    $record->title = optional_param('title', '', PARAM_TEXT);
+    // Title is hardcoded based on grade level, so we don't save it from form
     $record->passage = optional_param('passage', '', PARAM_TEXT);
     $record->passage_2 = optional_param('passage_2', '', PARAM_TEXT);
     $record->passage_3 = optional_param('passage_3', '', PARAM_TEXT);
@@ -79,8 +79,8 @@ $exp_time_val = $record->expiration_time ? date('H:i', $record->expiration_time)
                 <input type="hidden" name="action" value="save">
 
                 <div class="form-group mb-4">
-                    <label class="font-weight-bold">Passage Title</label>
-                    <input type="text" class="form-control" name="title" value="<?php echo isset($record->title) ? s($record->title) : ''; ?>" placeholder="e.g. Grade 7 Pre-Test" required>
+                    <label class="font-weight-bold">Grade Level Assessment</label>
+                    <input type="text" class="form-control" value="<?php echo isset($record->title) ? s($record->title) : ''; ?>" readonly disabled>
                 </div>
 
                 <div class="row mb-4">
