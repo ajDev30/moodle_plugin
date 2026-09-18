@@ -54,10 +54,10 @@ $total_profiles = $DB->count_records('readingassessment_ext_prof');
 $total_attempts = $DB->count_records('readingassessment_ext_att');
 
 // Recent attempts
-$sql = "SELECT att.id, prof.fullname, prof.lrn, prof.gender, prof.age, prof.grade_level, pass.title AS passage_title, pass.questions_json, att.accuracy_score, att.comprehension_score, att.classification, att.timecompleted, att.level_idx, att.answers_json, att.miscues_json 
+$sql = "SELECT att.id, prof.fullname, prof.lrn, prof.gender, prof.age, prof.grade_level, pass.title AS passage_title, pass.questions_json, att.accuracy_score, att.comprehension_score, att.classification, att.timecompleted, att.level_idx, att.answers_json, att.miscues_json, pass.passage, pass.passage_2, pass.passage_3, pass.passage_4 
         FROM {readingassessment_ext_att} att
         JOIN {readingassessment_ext_prof} prof ON att.profileid = prof.id
-        LEFT JOIN {readingassessment_ext_pass} pass ON prof.grade_level = pass.id
+        LEFT JOIN {readingassessment_ext_pass} pass ON prof.grade_level = pass.grade_level
         ORDER BY att.timecompleted DESC LIMIT 50";
 $recent_attempts = $DB->get_records_sql($sql);
 
@@ -164,7 +164,22 @@ $recent_attempts = $DB->get_records_sql($sql);
                                                 </span>
                                             </td>
                                             <td>
-                                                <button class="btn btn-sm btn-outline-primary" onclick="viewAnswers(this)" data-answers="<?php echo s($att->answers_json); ?>" data-questions="<?php echo s($att->questions_json); ?>" data-miscues="<?php echo s($att->miscues_json); ?>" data-student="<?php echo s($att->fullname); ?>">View</button>
+                                                <?php
+                                                    $lvl = isset($att->level_idx) ? (int)$att->level_idx : 0;
+                                                    $passage_text = '';
+                                                    if ($lvl === 0) $passage_text = $att->passage;
+                                                    else if ($lvl === 1) $passage_text = $att->passage_2;
+                                                    else if ($lvl === 2) $passage_text = $att->passage_3;
+                                                    else if ($lvl === 3) $passage_text = $att->passage_4;
+                                                ?>
+                                                <button class="btn btn-sm btn-outline-primary" onclick="viewAnswers(this)" 
+                                                    data-answers="<?php echo s($att->answers_json); ?>" 
+                                                    data-questions="<?php echo s($att->questions_json); ?>" 
+                                                    data-miscues="<?php echo s($att->miscues_json); ?>" 
+                                                    data-student="<?php echo s($att->fullname); ?>"
+                                                    data-passage="<?php echo s($passage_text); ?>"
+                                                    data-attid="<?php echo $att->id; ?>"
+                                                >View</button>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -283,6 +298,71 @@ function viewAnswers(btn) {
                 }
             }
             html += '</tbody></table>';
+        }
+        
+        const passageText = btn.getAttribute('data-passage') || '';
+        const miscuesRaw = btn.getAttribute('data-miscues');
+        const miscues = JSON.parse(miscuesRaw || '[]');
+
+        const attId = btn.getAttribute('data-attid');
+        html += '<hr><h6 class="font-weight-bold mb-3 mt-4">🗣️ Phil-IRI Pronunciation & Miscue Analysis</h6>';
+        html += `<div class="mb-3"><audio controls src="serve_audio.php?id=${attId}" style="width: 100%; height: 40px;"></audio></div>`;
+        
+        if (!passageText) {
+            html += '<p class="text-muted">No passage text available.</p>';
+        } else {
+            // Phil-IRI Marked Passage
+            html += '<div class="card bg-light mb-3"><div class="card-body" style="font-size: 1.15rem; line-height: 2.2;">';
+            html += '<h6 class="text-secondary border-bottom pb-2 mb-3">Marked Passage Text</h6>';
+            
+            let words = passageText.split(/\s+/);
+            // Match with miscues (assuming miscues contains {word, errorType})
+            // We use a simple pointer to align words if miscues array matches passage order
+            // Azure usually returns them in order of the reference text
+            let mIdx = 0;
+            
+            let markedHtml = '';
+            for (let i = 0; i < words.length; i++) {
+                let w = words[i];
+                if (!w.trim()) continue;
+                
+                let cleanW = w.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'?!]/g,"");
+                let isMis = false;
+                let isOmi = false;
+                
+                // Find matching miscue for this word
+                for(let k=0; k < miscues.length; k++) {
+                    if (miscues[k].word && miscues[k].word.toLowerCase() === cleanW) {
+                        if (miscues[k].errorType === 'Mispronunciation') isMis = true;
+                        if (miscues[k].errorType === 'Omission') isOmi = true;
+                        break;
+                    }
+                }
+                
+                if (isOmi) {
+                    markedHtml += `<span style="border: 2px solid #ef4444; border-radius: 50%; padding: 0 4px; margin: 0 2px; color: #ef4444; font-weight: bold;">${w}</span> `;
+                } else if (isMis) {
+                    markedHtml += `<span style="text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-thickness: 3px; color: #b45309; font-weight: bold;">${w}</span><sup style="color: #f59e0b;">(mis)</sup> `;
+                } else {
+                    markedHtml += `${w} `;
+                }
+            }
+            html += markedHtml;
+            html += '</div></div>';
+            
+            // Raw Miscue Table
+            html += '<h6 class="text-secondary mt-3">Raw Azure Miscue Data</h6>';
+            if (miscues.length === 0) {
+                html += '<p class="text-muted">No miscues recorded or perfect reading!</p>';
+            } else {
+                html += '<table class="table table-sm table-bordered">';
+                html += '<thead class="thead-light"><tr><th>Word</th><th>Error Type</th><th>Accuracy</th></tr></thead><tbody>';
+                miscues.forEach(m => {
+                    let errColor = m.errorType === 'Omission' ? 'text-danger' : (m.errorType === 'Mispronunciation' ? 'text-warning' : 'text-info');
+                    html += `<tr><td><strong>${escapeHtml(m.word || '-')}</strong></td><td class="${errColor}">${escapeHtml(m.errorType || 'Unknown')}</td><td>${m.accuracyScore !== undefined ? m.accuracyScore + '%' : '-'}</td></tr>`;
+                });
+                html += '</tbody></table>';
+            }
         }
         
         body.innerHTML = html;

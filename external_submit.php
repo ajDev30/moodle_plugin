@@ -47,10 +47,15 @@ $student_answers = json_decode($answers_raw, true) ?: [];
 $total_earned = 0;
 $total_max    = 0;
 
+$requires_manual = false;
 foreach ($custom_questions as $qidx => $q) {
     $qtype = $q['type'] ?? 'multichoice';
-    if ($qtype === 'description' || $qtype === 'shortanswer' || $qtype === 'essay') {
-        // Skip manual grading or display items from auto-grading
+    
+    if ($qtype === 'description') {
+        continue;
+    }
+    if ($qtype === 'shortanswer' || $qtype === 'essay') {
+        $requires_manual = true;
         continue;
     }
 
@@ -102,26 +107,34 @@ if ($level_idx === 3) {
     $word_reading_score = 0;
     $reading_rate = 0;
     
-    if ($comprehension >= 80) {
-        $classification = 'Listening: Independent';
-    } else if ($comprehension >= 59) {
-        $classification = 'Listening: Instructional';
+    if ($requires_manual) {
+        $classification = 'Pending (Manual Grade)';
     } else {
-        $classification = 'Listening: Frustration';
+        if ($comprehension >= 80) {
+            $classification = 'Listening: Independent';
+        } else if ($comprehension >= 59) {
+            $classification = 'Listening: Instructional';
+        } else {
+            $classification = 'Listening: Frustration';
+        }
     }
 } else {
     // Normal Reading Test
     $word_reading_score = round(max(0, (($passage_words - $words_attempted) / $passage_words) * 100), 2);
     $reading_rate = ($reading_time > 0) ? round(($passage_words / $reading_time) * 60) : 0;
 
-    if ($word_reading_score < 40 || ($reading_time < 5 && $word_reading_score < 70)) {
-        $classification = 'Non-Reader';
-    } else if ($word_reading_score >= 97 && $comprehension >= 80) {
-        $classification = 'Independent';
-    } else if ($word_reading_score >= 90 && $comprehension >= 59) {
-        $classification = 'Instructional';
+    if ($requires_manual) {
+        $classification = 'Pending (Manual Grade)';
     } else {
-        $classification = 'Frustration';
+        if ($word_reading_score < 40 || ($reading_time < 5 && $word_reading_score < 70)) {
+            $classification = 'Non-Reader';
+        } else if ($word_reading_score >= 97 && $comprehension >= 80) {
+            $classification = 'Independent';
+        } else if ($word_reading_score >= 90 && $comprehension >= 59) {
+            $classification = 'Instructional';
+        } else {
+            $classification = 'Frustration';
+        }
     }
 }
 
@@ -138,7 +151,19 @@ $attempt->answers_json = $answers_raw;
 $attempt->classification = $classification;
 $attempt->timecompleted = time();
 
-$DB->insert_record('readingassessment_ext_att', $attempt);
+$attempt_id = $DB->insert_record('readingassessment_ext_att', $attempt);
+
+// Save Audio if present
+if (isset($_FILES['audio_file']) && $_FILES['audio_file']['error'] === UPLOAD_ERR_OK) {
+    $audio_dir = $CFG->dataroot . '/readingassessment_audio';
+    if (!file_exists($audio_dir)) {
+        mkdir($audio_dir, 0777, true);
+    }
+    $ext = pathinfo($_FILES['audio_file']['name'], PATHINFO_EXTENSION);
+    if (!$ext) $ext = 'webm';
+    $dest = $audio_dir . '/attempt_' . $attempt_id . '.' . $ext;
+    move_uploaded_file($_FILES['audio_file']['tmp_name'], $dest);
+}
 
 echo json_encode([
     'status' => 'success',
