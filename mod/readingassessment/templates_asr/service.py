@@ -290,9 +290,13 @@ class AzureSession:
         )
         self._speech_config.speech_recognition_language = self.azure_lang
 
-        # Pronunciation assessment
+        # Clean the reference text: remove punctuation and lowercase using regex
+        import re
+        clean_reference_text = re.sub(r'[^\w\s\']', '', self.passage_text).lower()
+        clean_reference_text = " ".join(clean_reference_text.split())
+        
         pron_config = speechsdk.PronunciationAssessmentConfig(
-            reference_text=self.passage_text,
+            reference_text=clean_reference_text,
             grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
             granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
             enable_miscue=True,
@@ -319,6 +323,7 @@ class AzureSession:
         pron_config.apply_to(self._recognizer)
 
         # Callbacks (called from Azure SDK C++ thread — must use thread-safe bridge)
+        self._recognizer.recognizing.connect(self._on_recognizing)
         self._recognizer.recognized.connect(self._on_recognized)
         self._recognizer.session_stopped.connect(self._on_stopped)
         self._recognizer.canceled.connect(self._on_canceled)
@@ -392,15 +397,15 @@ class AzureSession:
                         max_matched_ref_idx = max(max_matched_ref_idx, ref_idx)
 
                     acc = float(w_copy.get("accuracy_score", 100.0) or 100.0)
-                    err = w_copy.get("error_type", "None")
-                    if err == "None" or acc >= 60.0:
-                        w_copy["is_miscue"] = False
-                        w_copy["miscue_type"] = "NONE"
-                    else:
-                        w_copy["is_miscue"] = True
-                        w_copy["miscue_type"] = "INSERTION" if tag == 'insert' else "MISPRONUNCIATION"
-                        if err == "None":
-                            w_copy["error_type"] = "Insertion" if tag == 'insert' else "Mispronunciation"
+                    
+                    # If the word was substituted or inserted, it is a miscue regardless of how clearly it was spoken
+                    w_copy["is_miscue"] = True
+                    w_copy["miscue_type"] = "INSERTION" if tag == 'insert' else "MISPRONUNCIATION"
+                    w_copy["error_type"] = "Insertion" if tag == 'insert' else "Mispronunciation"
+                    
+                    if tag == 'replace':
+                        w_copy["accuracy_score"] = 0.0 # Force low score to trigger Coach Mode
+                        
                     final_words.append(w_copy)
 
             if tag == 'delete':
@@ -429,14 +434,36 @@ class AzureSession:
                         actual_idx = self._next_passage_idx + ref_idx
                         w_copy["passage_idx"] = actual_idx
                         max_matched_ref_idx = max(max_matched_ref_idx, ref_idx)
-                    w_copy["is_miscue"] = False
-                    w_copy["miscue_type"] = "NONE"
+                    
+                    acc = float(w_copy.get("accuracy_score", 100.0) or 100.0)
+                    err = w_copy.get("error_type", "None")
+                    
+                    if acc < 60.0 or err in ("Mispronunciation", "Omission"):
+                        w_copy["is_miscue"] = True
+                        w_copy["miscue_type"] = "MISPRONUNCIATION" if err == "None" else w_copy.get("miscue_type", "MISPRONUNCIATION")
+                        if err == "None":
+                            w_copy["error_type"] = "Mispronunciation"
+                    else:
+                        w_copy["is_miscue"] = False
+                        w_copy["miscue_type"] = "NONE"
+                        
                     final_words.append(w_copy)
 
         if max_matched_ref_idx >= 0:
             self._next_passage_idx += (max_matched_ref_idx + 1)
 
         return final_words
+
+    def _on_recognizing(self, evt) -> None:
+        """Called by Azure SDK for real-time partial transcription."""
+        if self._event_loop and self.ws_queue is not None:
+            text_clean = evt.result.text.strip()
+            if text_clean:
+                msg = {
+                    "type": "partial",
+                    "result": { "text": text_clean }
+                }
+                asyncio.run_coroutine_threadsafe(self.ws_queue.put(msg), self._event_loop)
 
     def _on_recognized(self, evt) -> None:
         """Called by Azure SDK when a recognition result is ready (C++ thread)."""
@@ -469,7 +496,7 @@ class AzureSession:
         if self._event_loop and self.ws_queue is not None:
             text_clean = result.text.strip()
             msg = {
-                "type":       "partial",
+                "type":       "final",
                 "text":       text_clean,
                 "scores":     scores,
                 "word_results": word_results,
@@ -907,6 +934,11 @@ async def websocket_stream_endpoint(websocket: WebSocket):
                             "azure_region": AZURE_REGION,
                         })
 
+                    elif msg_type == "sync_index":
+                        new_idx = data.get("index", 0)
+                        if azure_session:
+                            azure_session._next_passage_idx = new_idx
+                            
                     elif msg_type == "stop":
                         if azure_session:
                             azure_session.stop()
