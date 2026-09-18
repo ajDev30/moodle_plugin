@@ -87,19 +87,15 @@ if (empty($token)) {
                     </div>
 
                     <div class="form-group mb-4">
-                        <label class="font-weight-bold text-secondary">Reading Assessment Passage</label>
+                        <label class="font-weight-bold text-secondary">Grade Level</label>
                         <select name="grade_level" class="form-control form-control-lg" required>
-                            <option value="" disabled selected>Select reading assessment...</option>
-                            <?php
-                            $available_passages = $DB->get_records('readingassessment_ext_pass', null, 'sortorder ASC, id ASC');
-                            foreach ($available_passages as $p) {
-                                $disp = !empty($p->title) ? s($p->title) : "Grade " . $p->grade_level;
-                                // We keep the "grade_level" parameter name but pass the passage ID instead!
-                                // Wait! If we pass passage ID, we must update the backend to look up by ID instead of grade_level!
-                                // But to avoid breaking existing DB schemas for profile tracking, we can just save passage ID into the 'grade_level' column of the profile table!
-                                echo '<option value="' . $p->id . '">' . $disp . '</option>';
-                            }
-                            ?>
+                            <option value="" disabled selected>Select your grade...</option>
+                            <option value="7">Grade 7</option>
+                            <option value="8">Grade 8</option>
+                            <option value="9">Grade 9</option>
+                            <option value="10">Grade 10</option>
+                            <option value="11">Grade 11</option>
+                            <option value="12">Grade 12</option>
                         </select>
                     </div>
 
@@ -123,7 +119,7 @@ if (empty($token)) {
         print_error('Invalid or expired token.');
     }
 
-    $passage_record = $DB->get_record('readingassessment_ext_pass', ['id' => $profile->grade_level]);
+    $passage_record = $DB->get_record('readingassessment_ext_pass', ['grade_level' => $profile->grade_level]);
     if (!$passage_record || empty($passage_record->passage)) {
         echo '<div class="alert alert-warning m-4">No reading passage configured. Please contact your teacher.</div>';
         echo $OUTPUT->footer();
