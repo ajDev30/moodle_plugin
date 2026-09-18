@@ -19,6 +19,10 @@ window.ExternalReadingAssessment = (function() {
     let currentPassageIndex = 0;
     let noMatchCount = 0;
     let totalMiscuesCount = 0;
+    
+    let mainAudioRecorder = null;
+    let mainAudioChunks = [];
+    let finalAudioBlob = null;
     let readingEndTime = null;
     
     // Coach Mode State
@@ -328,6 +332,11 @@ window.ExternalReadingAssessment = (function() {
     async function stopRecording() {
         if (coachTimer) clearTimeout(coachTimer);
         isRecording = false;
+
+        if (mainAudioRecorder && mainAudioRecorder.state !== 'inactive') {
+            mainAudioRecorder.stop();
+        }
+
         if (processorNode) {
             processorNode.disconnect();
             processorNode = null;
@@ -527,6 +536,21 @@ window.ExternalReadingAssessment = (function() {
                             type: "start",
                             target: (config.passages && config.passages[currentLevel]) ? config.passages[currentLevel] : ""
                         }));
+
+                        mainAudioChunks = [];
+                        finalAudioBlob = null;
+                        try {
+                            mainAudioRecorder = new MediaRecorder(microphoneStream);
+                            mainAudioRecorder.ondataavailable = function(evt) {
+                                if (evt.data && evt.data.size > 0) mainAudioChunks.push(evt.data);
+                            };
+                            mainAudioRecorder.onstop = function() {
+                                finalAudioBlob = new Blob(mainAudioChunks, { type: 'audio/webm' });
+                            };
+                            mainAudioRecorder.start();
+                        } catch(err) {
+                            console.warn("MediaRecorder not supported or failed to start", err);
+                        }
 
                         processorNode.onaudioprocess = (e) => {
                             if (!isRecording) return;
@@ -835,22 +859,28 @@ window.ExternalReadingAssessment = (function() {
                     const accuracy = evalData.accuracy_score || 0.0;
 
                     const submitUrl = `${config.wwwroot}/mod/readingassessment/external_submit.php`;
-                    const params = new URLSearchParams({
-                        token: config.token,
-                        transcript: liveTranscript,
-                        accuracy_score: accuracy,
-                        reading_time: rTime,
-                        reading_speed: rSpeed,
-                        miscues_json: JSON.stringify(miscuesList),
-                        total_miscues: totalMiscuesCount,
-                        answers_json: JSON.stringify(studentAnswers),
-                        level_idx: currentLevel
-                    });
+                    
+                    // Wait a tiny bit for MediaRecorder to fire its onstop event
+                    await new Promise(r => setTimeout(r, 600));
+
+                    const formData = new FormData();
+                    formData.append('token', config.token);
+                    formData.append('transcript', liveTranscript);
+                    formData.append('accuracy_score', accuracy);
+                    formData.append('reading_time', rTime);
+                    formData.append('reading_speed', rSpeed);
+                    formData.append('miscues_json', JSON.stringify(miscuesList));
+                    formData.append('total_miscues', totalMiscuesCount);
+                    formData.append('answers_json', JSON.stringify(studentAnswers));
+                    formData.append('level_idx', currentLevel);
+                    
+                    if (finalAudioBlob) {
+                        formData.append('audio_file', finalAudioBlob, 'attempt.webm');
+                    }
 
                     const response = await fetch(submitUrl, {
                         method: "POST",
-                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                        body: params
+                        body: formData
                     });
 
                     const resData = await response.json();
