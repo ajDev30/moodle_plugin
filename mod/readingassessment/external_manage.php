@@ -24,8 +24,8 @@ if (!$is_admin && !$is_teacher) {
 $context = context_system::instance();
 
 $action = optional_param('action', '', PARAM_TEXT);
-// Seed Grade Levels 7-12 if they don't exist
-$grades_to_seed = [7, 8, 9, 10, 11, 12];
+// Seed Grade Levels 7-10 if they don't exist
+$grades_to_seed = [7, 8, 9, 10];
 foreach ($grades_to_seed as $g) {
     if (!$DB->record_exists('readingassessment_ext_pass', ['grade_level' => $g])) {
         $new_pass = new stdClass();

@@ -105,45 +105,45 @@ $exp_time_val = $record->expiration_time ? date('H:i', $record->expiration_time)
                     <div class="card-body p-0">
                         <ul class="nav nav-tabs nav-fill" id="passageTabs" role="tablist" style="background: #f8fafc;">
                             <li class="nav-item">
-                                <a class="nav-link active font-weight-bold" id="tab-level-0" data-toggle="tab" href="#content-level-0" role="tab" onclick="switchLevel(0)">Level 1 (Independent)</a>
+                                <a class="nav-link active font-weight-bold" id="tab-level-0" data-toggle="tab" href="#content-level-0" role="tab" onclick="switchLevel(0)">Passage 1 (Independent)</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link font-weight-bold" id="tab-level-1" data-toggle="tab" href="#content-level-1" role="tab" onclick="switchLevel(1)">Level 2 (Instructional)</a>
+                                <a class="nav-link font-weight-bold" id="tab-level-1" data-toggle="tab" href="#content-level-1" role="tab" onclick="switchLevel(1)">Passage 2 (Instructional)</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link font-weight-bold" id="tab-level-2" data-toggle="tab" href="#content-level-2" role="tab" onclick="switchLevel(2)">Level 3 (Frustration)</a>
+                                <a class="nav-link font-weight-bold" id="tab-level-2" data-toggle="tab" href="#content-level-2" role="tab" onclick="switchLevel(2)">Passage 3 (Frustration)</a>
                             </li>
                             <li class="nav-item">
-                                <a class="nav-link font-weight-bold" id="tab-level-3" data-toggle="tab" href="#content-level-3" role="tab" onclick="switchLevel(3)">Level 4 (Non-Reader)</a>
+                                <a class="nav-link font-weight-bold" id="tab-level-3" data-toggle="tab" href="#content-level-3" role="tab" onclick="switchLevel(3)">Passage 4 (Non-Reader)</a>
                             </li>
                         </ul>
 
                         <div class="tab-content p-3" id="passageTabsContent">
-                            <!-- LEVEL 1 -->
+                            <!-- PASSAGE 1 -->
                             <div class="tab-pane fade show active" id="content-level-0" role="tabpanel">
                                 <div class="form-group mb-0">
-                                    <label class="font-weight-bold text-success">Level 1: Independent Passage Text</label>
+                                    <label class="font-weight-bold text-success">Passage 1: Independent Text</label>
                                     <textarea class="form-control" name="passage" rows="5" required><?php echo s($record->passage); ?></textarea>
                                 </div>
                             </div>
-                            <!-- LEVEL 2 -->
+                            <!-- PASSAGE 2 -->
                             <div class="tab-pane fade" id="content-level-1" role="tabpanel">
                                 <div class="form-group mb-0">
-                                    <label class="font-weight-bold text-primary">Level 2: Instructional Passage Text</label>
+                                    <label class="font-weight-bold text-primary">Passage 2: Instructional Text</label>
                                     <textarea class="form-control" name="passage_2" rows="5"><?php echo isset($record->passage_2) ? s($record->passage_2) : ''; ?></textarea>
                                 </div>
                             </div>
-                            <!-- LEVEL 3 -->
+                            <!-- PASSAGE 3 -->
                             <div class="tab-pane fade" id="content-level-2" role="tabpanel">
                                 <div class="form-group mb-0">
-                                    <label class="font-weight-bold text-warning">Level 3: Frustration Passage Text</label>
+                                    <label class="font-weight-bold text-warning">Passage 3: Frustration Text</label>
                                     <textarea class="form-control" name="passage_3" rows="5"><?php echo isset($record->passage_3) ? s($record->passage_3) : ''; ?></textarea>
                                 </div>
                             </div>
-                            <!-- LEVEL 4 -->
+                            <!-- PASSAGE 4 -->
                             <div class="tab-pane fade" id="content-level-3" role="tabpanel">
                                 <div class="form-group mb-0">
-                                    <label class="font-weight-bold text-danger">Level 4: Non-Reader Passage Text</label>
+                                    <label class="font-weight-bold text-danger">Passage 4: Non-Reader Text</label>
                                     <textarea class="form-control" name="passage_4" rows="5"><?php echo isset($record->passage_4) ? s($record->passage_4) : ''; ?></textarea>
                                 </div>
                             </div>
@@ -153,7 +153,7 @@ $exp_time_val = $record->expiration_time ? date('H:i', $record->expiration_time)
 
                 <!-- QUESTION BUILDER UI -->
                 <div class="form-group mb-4">
-                    <label class="font-weight-bold">📋 Questions for Current Level (<span id="q-level-label">Level 1</span>)</label>
+                    <label class="font-weight-bold">📋 Questions for Current Passage (<span id="q-level-label">Passage 1</span>)</label>
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px;">
                         
                         <!-- Hidden JSON Field -->
@@ -198,7 +198,7 @@ let currentEditLevel = 0;
 
 window.switchLevel = function(level) {
     currentEditLevel = level;
-    document.getElementById('q-level-label').innerText = 'Level ' + (level + 1);
+    document.getElementById('q-level-label').innerText = 'Passage ' + (level + 1);
     renderQ();
 };
 
