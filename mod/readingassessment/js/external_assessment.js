@@ -673,7 +673,22 @@ window.ExternalReadingAssessment = (function() {
                                                 foundMispronunciationIdx = passageIdx;
                                             }
 
-                                            // Removed text highlighting logic to prevent distraction for fast readers
+                                            // Highlight Passage Words
+                                            if (passageIdx < passageTokens.length) {
+                                                const span = document.getElementById(`ra-ext-word-${passageIdx}`);
+                                                if (span) {
+                                                    if (err === "None" || err === "Insertion") {
+                                                        span.style.color = "#059669"; // Green
+                                                        span.style.borderBottom = "2px solid #059669";
+                                                    } else if (err === "Mispronunciation") {
+                                                        span.style.color = "#d97706"; // Orange
+                                                        span.style.borderBottom = "2px solid #d97706";
+                                                    } else if (err === "Omission") {
+                                                        span.style.color = "#dc2626"; // Red
+                                                        span.style.borderBottom = "2px dashed #dc2626";
+                                                    }
+                                                }
+                                            }
 
                                             // Populate Detailed Table (only if we have the rows)
                                             if (wordRow && phonemeRow && scoreRow) {
@@ -748,7 +763,9 @@ window.ExternalReadingAssessment = (function() {
                                             }
                                         });
 
-                                        // Auto coach mode trigger removed to prevent interrupting fast readers
+                                        if (foundMispronunciationIdx !== -1) {
+                                            window.triggerCoachMode(foundMispronunciationIdx);
+                                        }
                                     }
                                 } else if (msg.type === "attempt_ready" || msg.type === "ready") {
                                     console.log("Session ready:", msg.message);
