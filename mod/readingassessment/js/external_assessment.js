@@ -525,7 +525,7 @@ window.ExternalReadingAssessment = (function() {
 
                         ws.send(JSON.stringify({
                             type: "start",
-                            target: config.passage
+                            target: (config.passages && config.passages[currentLevel]) ? config.passages[currentLevel] : ""
                         }));
 
                         processorNode.onaudioprocess = (e) => {
