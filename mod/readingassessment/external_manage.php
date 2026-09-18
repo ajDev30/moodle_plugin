@@ -24,35 +24,21 @@ if (!$is_admin && !$is_teacher) {
 $context = context_system::instance();
 
 $action = optional_param('action', '', PARAM_TEXT);
-if ($action === 'add_passage') {
-    $new_pass = new stdClass();
-    $new_pass->title = 'New Passage';
-    $new_pass->passage = 'Please enter reading text here.';
-    $new_pass->questions_json = '[]';
-    $new_pass->timecreated = time();
-    $new_pass->grade_level = 0;
-    
-    $max_sort = $DB->get_field_sql("SELECT MAX(sortorder) FROM {readingassessment_ext_pass}") ?: 0;
-    $new_pass->sortorder = $max_sort + 1;
-    $DB->insert_record('readingassessment_ext_pass', $new_pass);
-    redirect(new moodle_url('/mod/readingassessment/external_manage.php'));
-} else if ($action === 'move_up' || $action === 'move_down') {
-    $id = required_param('id', PARAM_INT);
-    $current = $DB->get_record('readingassessment_ext_pass', ['id' => $id]);
-    if ($current) {
-        $operator = $action === 'move_up' ? '<' : '>';
-        $order = $action === 'move_up' ? 'DESC' : 'ASC';
-        $swap = $DB->get_record_sql("SELECT * FROM {readingassessment_ext_pass} WHERE sortorder $operator ? ORDER BY sortorder $order LIMIT 1", [$current->sortorder]);
-        if ($swap) {
-            $temp = $current->sortorder;
-            $current->sortorder = $swap->sortorder;
-            $swap->sortorder = $temp;
-            $DB->update_record('readingassessment_ext_pass', $current);
-            $DB->update_record('readingassessment_ext_pass', $swap);
-        }
+// Seed Grade Levels 7-12 if they don't exist
+$grades_to_seed = [7, 8, 9, 10, 11, 12];
+foreach ($grades_to_seed as $g) {
+    if (!$DB->record_exists('readingassessment_ext_pass', ['grade_level' => $g])) {
+        $new_pass = new stdClass();
+        $new_pass->title = 'Grade ' . $g . ' Assessment';
+        $new_pass->passage = 'Please enter reading text here.';
+        $new_pass->questions_json = '[]';
+        $new_pass->timecreated = time();
+        $new_pass->grade_level = $g;
+        $new_pass->sortorder = $g;
+        $DB->insert_record('readingassessment_ext_pass', $new_pass);
     }
-    redirect(new moodle_url('/mod/readingassessment/external_manage.php'));
 }
+
 
 $PAGE->set_url('/mod/readingassessment/external_manage.php');
 $PAGE->set_context($context);
@@ -98,8 +84,6 @@ $recent_attempts = $DB->get_records_sql($sql);
                                     <strong><?php echo $disp; ?></strong>
                                 </div>
                                 <div>
-                                    <a href="external_manage.php?action=move_up&id=<?php echo $p->id; ?>" class="btn btn-sm btn-light">↑</a>
-                                    <a href="external_manage.php?action=move_down&id=<?php echo $p->id; ?>" class="btn btn-sm btn-light">↓</a>
                                     <a href="external_edit.php?grade=<?php echo $p->id; ?>" class="btn btn-sm btn-primary ml-2">Edit ➔</a>
                                 </div>
                             </div>
@@ -107,9 +91,6 @@ $recent_attempts = $DB->get_records_sql($sql);
                         <?php if (empty($passages)): ?>
                             <div class="list-group-item text-muted text-center">No passages configured yet.</div>
                         <?php endif; ?>
-                    </div>
-                    <div class="mt-3 text-center">
-                        <a href="external_manage.php?action=add_passage" class="btn btn-success font-weight-bold shadow-sm">➕ Add New Passage</a>
                     </div>
                 </div>
             </div>

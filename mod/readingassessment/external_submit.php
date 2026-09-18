@@ -22,7 +22,7 @@ if ($existing) {
 }
 
 // Get passage and questions to evaluate comprehension
-$passage_record = $DB->get_record('readingassessment_ext_pass', ['id' => $profile->grade_level]);
+$passage_record = $DB->get_record('readingassessment_ext_pass', ['grade_level' => $profile->grade_level]);
 $custom_questions = [];
 if ($passage_record && !empty($passage_record->questions_json)) {
     $all_questions = json_decode($passage_record->questions_json, true) ?: [];
