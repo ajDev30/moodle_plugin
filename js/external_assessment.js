@@ -411,7 +411,18 @@ window.ExternalReadingAssessment = (function() {
             startBtn.disabled = false;
             startBtn.classList.remove("btn-danger", "btn-warning");
             startBtn.classList.add("btn-success");
-            startBtn.innerHTML = "🎙️ Start Reading";
+            
+            if (currentLevel === 3) {
+                startBtn.innerHTML = "🔊 Listen to Passage";
+                
+                // Hide mic components
+                const micSection = document.getElementById("ra-live-transcript")?.parentElement;
+                if (micSection) micSection.style.display = "none";
+            } else {
+                startBtn.innerHTML = "🎙️ Start Reading";
+                const micSection = document.getElementById("ra-live-transcript")?.parentElement;
+                if (micSection) micSection.style.display = "block";
+            }
         }
         
         const submitBtn = document.getElementById("ra-btn-submit");
@@ -441,6 +452,27 @@ window.ExternalReadingAssessment = (function() {
         if (!startBtn) return;
 
         startBtn.addEventListener("click", async () => {
+            if (currentLevel === 3) {
+                // Listening Comprehension Mode
+                startBtn.disabled = true;
+                startBtn.innerHTML = "🔊 Reading...";
+                statusText.textContent = "Please listen to the passage carefully...";
+                
+                const rawText = (config.passages && config.passages[currentLevel]) ? config.passages[currentLevel] : "";
+                const utterance = new SpeechSynthesisUtterance(rawText);
+                utterance.rate = 0.9; // Slightly slower for comprehension
+                
+                utterance.onend = () => {
+                    startBtn.innerHTML = "✅ Finished Reading";
+                    statusText.textContent = "You can now answer the questions below.";
+                    if (submitBtn) submitBtn.disabled = false;
+                };
+                
+                window.speechSynthesis.cancel(); // Stop any previous speech
+                window.speechSynthesis.speak(utterance);
+                return;
+            }
+
             if (!isRecording) {
                 try {
                     statusText.textContent = "Requesting microphone access...";
