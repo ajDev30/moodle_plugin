@@ -269,9 +269,21 @@ function readingassessment_render_questions(array $custom_questions, string $for
     $html .= '<p class="ra-quiz-intro">Please complete the items below based on the reading passage:</p>';
     $html .= '<form id="' . $form_id . '">';
 
+    $level_counts = [];
+
     foreach ($custom_questions as $qidx => $q) {
         $type = $q['type'] ?? 'multichoice';
-        $html .= '<div class="ra-question-item">';
+        $q_level = isset($q['level_idx']) ? (int)$q['level_idx'] : 0;
+        
+        if ($type !== 'description') {
+            if (!isset($level_counts[$q_level])) {
+                $level_counts[$q_level] = 0;
+            }
+            $level_counts[$q_level]++;
+            $display_num = $level_counts[$q_level];
+        }
+
+        $html .= '<div class="ra-question-item" id="ra-q-container-' . $qidx . '">';
 
         if ($type === 'description') {
             $html .= '<div class="ra-question-description">';
@@ -280,7 +292,7 @@ function readingassessment_render_questions(array $custom_questions, string $for
             $html .= '</div>';
 
         } else if ($type === 'multichoice') {
-            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<div class="ra-question-title">' . $display_num . '. ' . s($q['question'] ?? '') . '</div>';
             if (!empty($q['options'])) {
                 $html .= '<div class="ra-options-stack">';
                 $opts_to_render = $q['options'];
@@ -299,7 +311,7 @@ function readingassessment_render_questions(array $custom_questions, string $for
             }
 
         } else if ($type === 'truefalse') {
-            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<div class="ra-question-title">' . $display_num . '. ' . s($q['question'] ?? '') . '</div>';
             $html .= '<div class="ra-options-inline">';
             $html .= '<label class="ra-option-label ra-tf-true">';
             $html .= '<input type="radio" name="ra_q_' . $qidx . '" value="true">';
@@ -312,7 +324,7 @@ function readingassessment_render_questions(array $custom_questions, string $for
             $html .= '</div>';
 
         } else if ($type === 'matching' || $type === 'randommatch') {
-            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? 'Match the items:') . '</div>';
+            $html .= '<div class="ra-question-title">' . $display_num . '. ' . s($q['question'] ?? 'Match the items:') . '</div>';
             $pairs = $q['pairs'] ?? [];
             $all_answers = array_filter(array_map(function($p) { return $p['answer'] ?? ''; }, $pairs));
             shuffle($all_answers);
@@ -331,11 +343,11 @@ function readingassessment_render_questions(array $custom_questions, string $for
             $html .= '</div>';
 
         } else if ($type === 'shortanswer' || $type === 'numerical' || $type === 'calculated' || $type === 'calculatedsimple' || $type === 'calculatedmulti') {
-            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<div class="ra-question-title">' . $display_num . '. ' . s($q['question'] ?? '') . '</div>';
             $html .= '<input type="text" name="ra_q_' . $qidx . '" placeholder="Type your answer here..." class="ra-input-text">';
 
         } else if ($type === 'essay') {
-            $html .= '<div class="ra-question-title">' . ($qidx + 1) . '. ' . s($q['question'] ?? '') . '</div>';
+            $html .= '<div class="ra-question-title">' . $display_num . '. ' . s($q['question'] ?? '') . '</div>';
             $html .= '<textarea name="ra_q_' . $qidx . '" rows="4" placeholder="Write your essay response here..." class="ra-textarea"></textarea>';
 
         } else if ($type === 'ordering') {
