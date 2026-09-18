@@ -191,78 +191,7 @@ if (empty($token)) {
             <div class="ra-passage-box p-4" id="ra-passage-text" style="font-size: 1.25rem; line-height: 1.8;">
                 <?php echo nl2br(s($passage_record->passage)); ?>
             </div>
-            <div id="ra-pronunciation-results" class="p-3" style="display: none; background: #fff; border-top: 1px solid #e2e8f0; text-align: center;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h6 class="font-weight-bold text-secondary mb-0">Pronunciation Feedback</h6>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button type="button" class="btn btn-primary font-weight-bold shadow-sm" id="ra-view-default" onclick="switchResultsView('default')">Default Assessment</button>
-                        <button type="button" class="btn btn-outline-primary font-weight-bold shadow-sm" id="ra-view-coach" onclick="switchResultsView('coach')">Coach Mode Results</button>
-                    </div>
-                </div>
-                
-                <div id="ra-default-results-container">
-                    <div id="summarytable" style="display:flex; justify-content:center; align-items:center; margin-bottom: 20px;">
-                        <table style="border-collapse:collapse; text-align: center; width: 100%; max-width: 600px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden;">
-                            <tr style="background: #1e40af; color: white;">
-                                <th style="border:1px solid #e2e8f0; padding:12px;">Word Reading (%)</th>
-                                <th style="border:1px solid #e2e8f0; padding:12px;">Comprehension (%)</th>
-                                <th style="border:1px solid #e2e8f0; padding:12px;">Reading Rate (WPM)</th>
-                            </tr>
-                            <tr style="background: white;">
-                                <td id="ra-summ-word-reading" style="border:1px solid #e2e8f0; padding:12px; font-weight: bold; font-size: 1.2rem;">0%</td>
-                                <td id="ra-summ-comp" style="border:1px solid #e2e8f0; padding:12px; font-weight: bold; font-size: 1.2rem;">0%</td>
-                                <td id="ra-summ-wpm" style="border:1px solid #e2e8f0; padding:12px; font-weight: bold; font-size: 1.2rem;">0</td>
-                            </tr>
-                            <tr style="background: #f8fafc;">
-                                <td colspan="3" style="border:1px solid #e2e8f0; padding:15px;">
-                                    <span style="font-size: 1.1rem; color: #475569;">Oral Reading Profile: </span>
-                                    <span id="ra-summ-profile" style="font-size: 1.3rem; font-weight: bold; color: #0f172a; text-transform: uppercase;">PENDING</span>
-                                </td>
-                            </tr>
-                        </table>
-                    </div>
-
-                    <div id="detailedtable" style="overflow-x:auto; margin: 5px; padding-bottom: 10px;">
-                        <table style="border-collapse:collapse; margin:auto;">
-                            <tr id="ra-wordrow"></tr>
-                            <tr id="ra-phonemerow"></tr>
-                            <tr id="ra-scorerow"></tr>
-                        </table>
-                    </div>
-                </div>
-
-                <div id="ra-coach-results-container" style="display: none;">
-                    <div style="font-size: 0.9rem; color: #64748b; margin-bottom: 15px;">These are your attempts during Teacher Coach Mode.</div>
-                    <div id="coachtable" style="overflow-x:auto; margin: 5px; padding-bottom: 10px;">
-                        <table style="border-collapse:collapse; margin:auto;">
-                            <tr id="ra-coach-wordrow"></tr>
-                            <tr id="ra-coach-phonemerow"></tr>
-                            <tr id="ra-coach-scorerow"></tr>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <script>
-                function switchResultsView(view) {
-                    const defaultContainer = document.getElementById("ra-default-results-container");
-                    const coachContainer = document.getElementById("ra-coach-results-container");
-                    const defaultBtn = document.getElementById("ra-view-default");
-                    const coachBtn = document.getElementById("ra-view-coach");
-
-                    if (view === 'coach') {
-                        defaultContainer.style.display = "none";
-                        coachContainer.style.display = "block";
-                        coachBtn.classList.replace('btn-outline-primary', 'btn-primary');
-                        defaultBtn.classList.replace('btn-primary', 'btn-outline-primary');
-                    } else {
-                        coachContainer.style.display = "none";
-                        defaultContainer.style.display = "block";
-                        defaultBtn.classList.replace('btn-outline-primary', 'btn-primary');
-                        coachBtn.classList.replace('btn-primary', 'btn-outline-primary');
-                    }
-                }
-            </script>
+            <!-- Removed ra-pronunciation-results completely as it was confusing for students and is now in the teacher dashboard -->
 
             <!-- Coach Mode Isolation Card -->
             <div id="ra-isolation-card" class="ra-isolation-card" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; width: 90%; max-width: 500px; border: 2px solid #8b5cf6; border-radius: 12px; background: #f5f3ff; box-shadow: 0 15px 50px rgba(0,0,0,0.4);">
