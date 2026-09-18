@@ -767,6 +767,34 @@ window.ExternalReadingAssessment = (function() {
                                             window.triggerCoachMode(foundMispronunciationIdx);
                                         }
                                     }
+                                } else if (msg.type === "assessment_report") {
+                                    // Save the final perfectly calculated Azure sample scores and words
+                                    if (heldEvaluationData) {
+                                        heldEvaluationData.accuracy_score = msg.scores.accuracy_score;
+                                        heldEvaluationData.scores = msg.scores; // fluency, prosody, completeness
+                                        
+                                        // Collect the exact final Omissions, Insertions, etc for the backend!
+                                        const finalWords = msg.word_results || [];
+                                        let miscuesArr = [];
+                                        finalWords.forEach((wr, idx) => {
+                                            const et = wr.error_type || "None";
+                                            if (et !== "None") {
+                                                miscuesArr.push({
+                                                    word: wr.word,
+                                                    error_type: et,
+                                                    accuracy_score: wr.accuracy_score || 0
+                                                });
+                                            }
+                                        });
+                                        heldEvaluationData.miscues = miscuesArr;
+                                        
+                                        // Update the summary UI with the final correct Phil-IRI word reading score
+                                        const wordsInPassage = passageTokens.length || 1;
+                                        const totalMiscuesFinal = miscuesArr.length;
+                                        const finalWordReadingScore = Math.max(0, ((wordsInPassage - totalMiscuesFinal) / wordsInPassage) * 100);
+                                        const summWordReading = document.getElementById("ra-summ-word-reading");
+                                        if (summWordReading) summWordReading.innerText = Math.round(finalWordReadingScore) + "%";
+                                    }
                                 } else if (msg.type === "attempt_ready" || msg.type === "ready") {
                                     console.log("Session ready:", msg.message);
                                 }

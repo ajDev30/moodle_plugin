@@ -485,13 +485,10 @@ class AzureSession:
         for w in pron_result.words:
             wr = self._parse_word(w)
             if wr:
+                self.word_results.append(wr)
                 raw_word_results.append(wr)
-
-        aligned_words = self._align_miscues_with_reference(raw_word_results)
-        word_results = []
-        for aw in aligned_words:
-            self.word_results.append(aw)
-            word_results.append(aw)
+        
+        word_results = raw_word_results
 
         if self._event_loop and self.ws_queue is not None:
             text_clean = result.text.strip()
@@ -515,7 +512,71 @@ class AzureSession:
     def _on_stopped(self, evt) -> None:
         self.state = "done"
         if self._event_loop and self.ws_queue is not None:
+            # Generate final aligned report according to Azure Sample
+            report = self._generate_final_report()
+            asyncio.run_coroutine_threadsafe(self.ws_queue.put(report), self._event_loop)
             asyncio.run_coroutine_threadsafe(self.ws_queue.put({"type": "done"}), self._event_loop)
+
+    def _generate_final_report(self) -> Dict[str, Any]:
+        """Calculates exact final scores and alignments using official Azure diff logic."""
+        import string, difflib
+
+        ref_words = [w.strip(string.punctuation).lower() for w in self.passage_text.split()]
+        ref_words = [w for w in ref_words if len(w) > 0]
+        
+        # Self.word_results contains raw parsed Azure words (Mispronunciation or None)
+        rec_words = self.word_results
+
+        diff = difflib.SequenceMatcher(None, ref_words, [w.get("word", "").lower() for w in rec_words])
+        final_words = []
+        
+        for tag, i1, i2, j1, j2 in diff.get_opcodes():
+            if tag in ['insert', 'replace']:
+                for word in rec_words[j1:j2]:
+                    w_copy = dict(word)
+                    if w_copy.get("error_type") == "None":
+                        w_copy["error_type"] = "Insertion"
+                    final_words.append(w_copy)
+            if tag in ['delete', 'replace']:
+                for word_text in ref_words[i1:i2]:
+                    final_words.append({
+                        "word": word_text,
+                        "error_type": "Omission",
+                        "accuracy_score": 0.0,
+                        "phonemes": []
+                    })
+            if tag == 'equal':
+                final_words += rec_words[j1:j2]
+
+        final_accuracy_scores = [w["accuracy_score"] for w in final_words if w.get("error_type") != "Insertion"]
+        accuracy_score = (sum(final_accuracy_scores) / len(final_accuracy_scores)) if final_accuracy_scores else 0.0
+
+        durations = [s.get("duration", 1) for s in self.utterance_scores]
+        fluency_scores = [s.get("fluency_score", 0) for s in self.utterance_scores]
+        if sum(durations) > 0:
+            fluency_score = sum([x * y for (x, y) in zip(fluency_scores, durations)]) / sum(durations)
+        else:
+            fluency_score = 0.0
+
+        completeness_score = (len([w for w in rec_words if w.get("error_type") == "None"]) / len(ref_words) * 100) if ref_words else 0.0
+        completeness_score = min(completeness_score, 100.0)
+
+        prosody_scores = [s.get("prosody_score", 0) for s in self.utterance_scores]
+        prosody_score = (sum(prosody_scores) / len(prosody_scores)) if prosody_scores else 0.0
+
+        pron_score = accuracy_score * 0.4 + prosody_score * 0.2 + fluency_score * 0.2 + completeness_score * 0.2
+
+        return {
+            "type": "assessment_report",
+            "scores": {
+                "accuracy_score": round(accuracy_score, 1),
+                "fluency_score": round(fluency_score, 1),
+                "completeness_score": round(completeness_score, 1),
+                "prosody_score": round(prosody_score, 1),
+                "pron_score": round(pron_score, 1)
+            },
+            "word_results": final_words
+        }
 
     def _on_canceled(self, evt) -> None:
         logger.warning(f"session={self.session_id} event=azure_canceled reason={evt.reason}")
@@ -567,75 +628,69 @@ class AzureSession:
             return None
 
     def get_final_assessment(self) -> Dict[str, Any]:
-        """Build the final assessment dict from accumulated Azure results with SequenceMatcher miscue alignment."""
-        import difflib
+        """Build the final assessment dict using the exact Azure Sample logic for continuous mode."""
         import string
+        import difflib
 
-        ref_words = [w.strip(string.punctuation).lower() for w in self.passage_text.split() if w.strip(string.punctuation)]
-        rec_words = [w for w in self.word_results]
+        ref_words = [w.strip(string.punctuation).lower() for w in self.passage_text.split()]
+        ref_words = [w for w in ref_words if len(w) > 0]
+        
+        # Self.word_results contains raw parsed Azure words (Mispronunciation, None, etc)
+        rec_words = self.word_results
 
-        if ref_words and rec_words:
-            rec_word_texts = [w["word"].lower().strip(string.punctuation) for w in rec_words]
-            matcher = difflib.SequenceMatcher(None, ref_words, rec_word_texts)
-            aligned_words = []
-            for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-                if tag == 'replace':
-                    for idx_offset, w in enumerate(rec_words[j1:j2]):
-                        w_copy = dict(w)
-                        acc = float(w_copy.get("accuracy_score", 100.0) or 100.0)
-                        err = w_copy.get("error_type", "None")
-                        if err == "None" or acc >= 60.0:
-                            w_copy["is_miscue"] = False
-                            w_copy["miscue_type"] = "NONE"
-                        else:
-                            w_copy["is_miscue"] = True
-                            w_copy["miscue_type"] = "MISPRONUNCIATION"
-                        aligned_words.append(w_copy)
-                elif tag == 'insert':
-                    for w in rec_words[j1:j2]:
-                        w_copy = dict(w)
-                        w_copy["is_miscue"] = True
-                        w_copy["miscue_type"] = "INSERTION"
-                        aligned_words.append(w_copy)
-                elif tag == 'delete':
-                    for ref_w in ref_words[i1:i2]:
-                        aligned_words.append({
-                            "word": ref_w,
-                            "passage_idx": None,
-                            "miscue_type": "OMISSION",
-                            "is_miscue": True,
-                            "pronunciation_score": 0.0,
-                            "accuracy_score": 0.0,
-                            "error_type": "Omission",
-                            "phoneme_results": [],
-                            "word_start": None,
-                            "word_end": None,
-                        })
-                elif tag == 'equal':
-                    for w in rec_words[j1:j2]:
-                        w_copy = dict(w)
-                        w_copy["is_miscue"] = False
-                        w_copy["miscue_type"] = "NONE"
-                        aligned_words.append(w_copy)
-            words = aligned_words
+        diff = difflib.SequenceMatcher(None, ref_words, [w.get("word", "").lower() for w in rec_words])
+        final_words = []
+        
+        for tag, i1, i2, j1, j2 in diff.get_opcodes():
+            if tag in ['insert', 'replace']:
+                for word in rec_words[j1:j2]:
+                    w_copy = dict(word)
+                    if w_copy.get("error_type") == "None":
+                        w_copy["error_type"] = "Insertion"
+                    w_copy["miscue_type"] = w_copy["error_type"].upper()
+                    final_words.append(w_copy)
+            if tag in ['delete', 'replace']:
+                for word_text in ref_words[i1:i2]:
+                    final_words.append({
+                        "word": word_text,
+                        "error_type": "Omission",
+                        "miscue_type": "OMISSION",
+                        "is_miscue": True,
+                        "accuracy_score": 0.0,
+                        "phonemes": []
+                    })
+            if tag == 'equal':
+                for word in rec_words[j1:j2]:
+                    w_copy = dict(word)
+                    w_copy["miscue_type"] = w_copy.get("error_type", "None").upper()
+                    final_words.append(w_copy)
+
+        final_accuracy_scores = [w["accuracy_score"] for w in final_words if w.get("error_type") != "Insertion"]
+        accuracy_score = (sum(final_accuracy_scores) / len(final_accuracy_scores)) if final_accuracy_scores else 0.0
+
+        durations = [s.get("duration", 1) for s in self.utterance_scores]
+        fluency_scores = [s.get("fluency_score", 0) for s in self.utterance_scores]
+        if sum(durations) > 0:
+            fluency_score = sum([x * y for (x, y) in zip(fluency_scores, durations)]) / sum(durations)
         else:
-            words = rec_words
+            fluency_score = 0.0
 
-        n_words    = len([w for w in words if w["miscue_type"] != "INSERTION"])
-        n_miscues  = len([w for w in words if w["is_miscue"]])
-        n_correct  = max(0, n_words - n_miscues)
-        accuracy   = round((n_correct / n_words) * 100.0, 2) if n_words > 0 else 0.0
+        completeness_score = (len([w for w in rec_words if w.get("error_type") == "None"]) / len(ref_words) * 100) if ref_words else 0.0
+        completeness_score = min(completeness_score, 100.0)
 
-        # Mean utterance scores
-        mean_acc   = round(np.mean([s["accuracy_score"]     for s in self.utterance_scores]), 1) if self.utterance_scores else 0.0
-        mean_flu   = round(np.mean([s["fluency_score"]      for s in self.utterance_scores]), 1) if self.utterance_scores else 0.0
-        mean_comp  = round(np.mean([s["completeness_score"] for s in self.utterance_scores]), 1) if self.utterance_scores else 0.0
-        mean_pron  = round(np.mean([s["pron_score"]         for s in self.utterance_scores]), 1) if self.utterance_scores else 0.0
+        prosody_scores = [s.get("prosody_score", 0) for s in self.utterance_scores]
+        prosody_score = (sum(prosody_scores) / len(prosody_scores)) if prosody_scores else 0.0
 
-        mastery = accuracy >= (MASTER_THRESHOLD * 100)
-        status  = "MASTER" if mastery else ("ACCEPTABLE" if accuracy >= ACCEPTABLE_THRESHOLD * 100 else "NEEDS_PRACTICE")
+        pron_score = accuracy_score * 0.4 + prosody_score * 0.2 + fluency_score * 0.2 + completeness_score * 0.2
 
+        mastery = accuracy_score >= (MASTER_THRESHOLD * 100)
+        status  = "MASTER" if mastery else ("ACCEPTABLE" if accuracy_score >= ACCEPTABLE_THRESHOLD * 100 else "NEEDS_PRACTICE")
         rec_text = self.recognized_text.strip()
+
+        n_words    = len([w for w in final_words if w.get("error_type") != "Insertion"])
+        n_miscues  = len([w for w in final_words if w.get("error_type") in ("Mispronunciation", "Omission", "Insertion") or w.get("accuracy_score", 100.0) < 60.0])
+        n_correct  = max(0, n_words - n_miscues)
+
         return {
             "status":   status,
             "mastery":  mastery,
@@ -644,16 +699,17 @@ class AzureSession:
                 "transcript": rec_text,
             },
             "scores": {
-                "reading_accuracy":  accuracy,
-                "word_accuracy":     round(accuracy / 100.0, 4),
-                "phoneme_accuracy":  round(mean_acc / 100.0, 4),
-                "azure_accuracy":    mean_acc,
-                "azure_fluency":     mean_flu,
-                "azure_completeness": mean_comp,
-                "azure_pron":        mean_pron,
-                "overall_score":     mean_pron,
+                "reading_accuracy":  accuracy_score,
+                "word_accuracy":     round(accuracy_score / 100.0, 4),
+                "phoneme_accuracy":  round(accuracy_score / 100.0, 4),
+                "azure_accuracy":    accuracy_score,
+                "azure_fluency":     fluency_score,
+                "azure_completeness": completeness_score,
+                "azure_pron":        pron_score,
+                "overall_score":     pron_score,
             },
-            "words":        words,
+            "words":        final_words,
+            "word_results": final_words,
             "recognized":   rec_text,
             "word_count":   n_words,
             "miscue_count": n_miscues,
