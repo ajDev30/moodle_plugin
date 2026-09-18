@@ -97,17 +97,32 @@ else if ($level_idx === 3) $current_passage_text = $passage_record->passage_4;
 $passage_words = count(preg_split('/\s+/', preg_replace('/[.,\/#!$%\^&\*;:{}=\-_`~()"\'?]/', '', strtolower(trim($current_passage_text)))));
 if ($passage_words == 0) $passage_words = 1;
 
-$word_reading_score = round(max(0, (($passage_words - $words_attempted) / $passage_words) * 100), 2);
-$reading_rate = ($reading_time > 0) ? round(($passage_words / $reading_time) * 60) : 0;
-
-if ($word_reading_score < 40 || ($reading_time < 5 && $word_reading_score < 70)) {
-    $classification = 'Non-Reader';
-} else if ($word_reading_score >= 97 && $comprehension >= 80) {
-    $classification = 'Independent';
-} else if ($word_reading_score >= 90 && $comprehension >= 59) {
-    $classification = 'Instructional';
+if ($level_idx === 3) {
+    // LEVEL 4: Listening Comprehension Test
+    $word_reading_score = 0;
+    $reading_rate = 0;
+    
+    if ($comprehension >= 80) {
+        $classification = 'Listening: Independent';
+    } else if ($comprehension >= 59) {
+        $classification = 'Listening: Instructional';
+    } else {
+        $classification = 'Listening: Frustration';
+    }
 } else {
-    $classification = 'Frustration';
+    // Normal Reading Test
+    $word_reading_score = round(max(0, (($passage_words - $words_attempted) / $passage_words) * 100), 2);
+    $reading_rate = ($reading_time > 0) ? round(($passage_words / $reading_time) * 60) : 0;
+
+    if ($word_reading_score < 40 || ($reading_time < 5 && $word_reading_score < 70)) {
+        $classification = 'Non-Reader';
+    } else if ($word_reading_score >= 97 && $comprehension >= 80) {
+        $classification = 'Independent';
+    } else if ($word_reading_score >= 90 && $comprehension >= 59) {
+        $classification = 'Instructional';
+    } else {
+        $classification = 'Frustration';
+    }
 }
 
 $attempt = new stdClass();
