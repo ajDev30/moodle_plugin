@@ -586,32 +586,9 @@ window.ExternalReadingAssessment = (function() {
 
                                     if (msg.type === "final") {
                                         liveTranscript += " " + raw;
-                                        prevPartialWords = []; // reset for next chunk
                                         if (res.scores) {
                                             heldEvaluationData = { miscues: [], accuracy_score: res.scores.accuracy_score, comprehension_score: 0 };
                                         }
-                                    } else {
-                                        // Handle partial streaming highlighting
-                                        const curWords = raw.split(/\s+/).filter(w => w.length > 0);
-                                        for (let i = prevPartialWords.length; i < curWords.length; i++) {
-                                            let spokenWord = curWords[i].toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'?!]/g,"");
-                                            
-                                            // Try to match with current passage token
-                                            if (currentPassageIndex < passageTokens.length) {
-                                                let expectedWord = passageTokens[currentPassageIndex].toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'?!]/g,"");
-                                                if (spokenWord === expectedWord) {
-                                                    // Match!
-                                                    const span = document.getElementById(`ra-ext-word-${currentPassageIndex}`);
-                                                    if (span) {
-                                                        span.style.backgroundColor = "#e0f2fe"; // Light blue highlight
-                                                        span.style.color = "#0369a1";
-                                                    }
-                                                    currentPassageIndex++;
-                                                    resetCoachTimer(); // Coach Mode: reset timer on match
-                                                }
-                                            }
-                                        }
-                                        prevPartialWords = curWords;
                                     }
                                     
                                     if (transcriptDisplay) transcriptDisplay.textContent = liveTranscript + (msg.type === "partial" ? " " + raw : "");
@@ -696,22 +673,7 @@ window.ExternalReadingAssessment = (function() {
                                                 foundMispronunciationIdx = passageIdx;
                                             }
 
-                                            // Highlight Passage Words
-                                            if (passageIdx < passageTokens.length) {
-                                                const span = document.getElementById(`ra-ext-word-${passageIdx}`);
-                                                if (span) {
-                                                    if (err === "None" || err === "Insertion") {
-                                                        span.style.color = "#059669"; // Green
-                                                        span.style.borderBottom = "2px solid #059669";
-                                                    } else if (err === "Mispronunciation") {
-                                                        span.style.color = "#d97706"; // Orange
-                                                        span.style.borderBottom = "2px solid #d97706";
-                                                    } else if (err === "Omission") {
-                                                        span.style.color = "#dc2626"; // Red
-                                                        span.style.borderBottom = "2px dashed #dc2626";
-                                                    }
-                                                }
-                                            }
+                                            // Removed text highlighting logic to prevent distraction for fast readers
 
                                             // Populate Detailed Table (only if we have the rows)
                                             if (wordRow && phonemeRow && scoreRow) {
@@ -786,9 +748,7 @@ window.ExternalReadingAssessment = (function() {
                                             }
                                         });
 
-                                        if (foundMispronunciationIdx !== -1) {
-                                            window.triggerCoachMode(foundMispronunciationIdx);
-                                        }
+                                        // Auto coach mode trigger removed to prevent interrupting fast readers
                                     }
                                 } else if (msg.type === "attempt_ready" || msg.type === "ready") {
                                     console.log("Session ready:", msg.message);
