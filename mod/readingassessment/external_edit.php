@@ -99,38 +99,61 @@ $exp_time_val = $record->expiration_time ? date('H:i', $record->expiration_time)
                 </div>
 
                 <div class="card mb-4 border-info">
-                    <div class="card-header bg-info text-white font-weight-bold">
-                        📖 Adaptive Reading Passages (Phil-IRI)
+                    <div class="card-header bg-info text-white font-weight-bold d-flex justify-content-between align-items-center">
+                        <span>📖 Adaptive Reading Passages (Phil-IRI)</span>
                     </div>
-                    <div class="card-body">
-                        <p class="text-muted small mb-4">
-                            Configure up to 4 passages. The student will start at Level 1 (Independent). If they score "Frustration" or "Non-Reader", the system will automatically drop them to Level 2 (Instructional), and so on.
-                        </p>
-                        
-                        <div class="form-group mb-3">
-                            <label class="font-weight-bold">Level 1: Independent Passage (Baseline)</label>
-                            <textarea class="form-control" name="passage" rows="4" required><?php echo s($record->passage); ?></textarea>
-                        </div>
-                        
-                        <div class="form-group mb-3">
-                            <label class="font-weight-bold">Level 2: Instructional Passage (Step-down 1)</label>
-                            <textarea class="form-control" name="passage_2" rows="4"><?php echo isset($record->passage_2) ? s($record->passage_2) : ''; ?></textarea>
-                        </div>
-                        
-                        <div class="form-group mb-3">
-                            <label class="font-weight-bold">Level 3: Frustration Passage (Step-down 2)</label>
-                            <textarea class="form-control" name="passage_3" rows="4"><?php echo isset($record->passage_3) ? s($record->passage_3) : ''; ?></textarea>
-                        </div>
-                        
-                        <div class="form-group mb-0">
-                            <label class="font-weight-bold">Level 4: Non-Reader Passage (Step-down 3)</label>
-                            <textarea class="form-control" name="passage_4" rows="4"><?php echo isset($record->passage_4) ? s($record->passage_4) : ''; ?></textarea>
+                    <div class="card-body p-0">
+                        <ul class="nav nav-tabs nav-fill" id="passageTabs" role="tablist" style="background: #f8fafc;">
+                            <li class="nav-item">
+                                <a class="nav-link active font-weight-bold" id="tab-level-0" data-toggle="tab" href="#content-level-0" role="tab" onclick="switchLevel(0)">Level 1 (Independent)</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link font-weight-bold" id="tab-level-1" data-toggle="tab" href="#content-level-1" role="tab" onclick="switchLevel(1)">Level 2 (Instructional)</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link font-weight-bold" id="tab-level-2" data-toggle="tab" href="#content-level-2" role="tab" onclick="switchLevel(2)">Level 3 (Frustration)</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link font-weight-bold" id="tab-level-3" data-toggle="tab" href="#content-level-3" role="tab" onclick="switchLevel(3)">Level 4 (Non-Reader)</a>
+                            </li>
+                        </ul>
+
+                        <div class="tab-content p-3" id="passageTabsContent">
+                            <!-- LEVEL 1 -->
+                            <div class="tab-pane fade show active" id="content-level-0" role="tabpanel">
+                                <div class="form-group mb-0">
+                                    <label class="font-weight-bold text-success">Level 1: Independent Passage Text</label>
+                                    <textarea class="form-control" name="passage" rows="5" required><?php echo s($record->passage); ?></textarea>
+                                </div>
+                            </div>
+                            <!-- LEVEL 2 -->
+                            <div class="tab-pane fade" id="content-level-1" role="tabpanel">
+                                <div class="form-group mb-0">
+                                    <label class="font-weight-bold text-primary">Level 2: Instructional Passage Text</label>
+                                    <textarea class="form-control" name="passage_2" rows="5"><?php echo isset($record->passage_2) ? s($record->passage_2) : ''; ?></textarea>
+                                </div>
+                            </div>
+                            <!-- LEVEL 3 -->
+                            <div class="tab-pane fade" id="content-level-2" role="tabpanel">
+                                <div class="form-group mb-0">
+                                    <label class="font-weight-bold text-warning">Level 3: Frustration Passage Text</label>
+                                    <textarea class="form-control" name="passage_3" rows="5"><?php echo isset($record->passage_3) ? s($record->passage_3) : ''; ?></textarea>
+                                </div>
+                            </div>
+                            <!-- LEVEL 4 -->
+                            <div class="tab-pane fade" id="content-level-3" role="tabpanel">
+                                <div class="form-group mb-0">
+                                    <label class="font-weight-bold text-danger">Level 4: Non-Reader Passage Text</label>
+                                    <textarea class="form-control" name="passage_4" rows="5"><?php echo isset($record->passage_4) ? s($record->passage_4) : ''; ?></textarea>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
+
                 <!-- QUESTION BUILDER UI -->
                 <div class="form-group mb-4">
-                    <label class="font-weight-bold">📋 Comprehension Questions</label>
+                    <label class="font-weight-bold">📋 Questions for Current Level (<span id="q-level-label">Level 1</span>)</label>
                     <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px;">
                         
                         <!-- Hidden JSON Field -->
@@ -171,6 +194,14 @@ function escapeHtml(str) {
     return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+let currentEditLevel = 0;
+
+window.switchLevel = function(level) {
+    currentEditLevel = level;
+    document.getElementById('q-level-label').innerText = 'Level ' + (level + 1);
+    renderQ();
+};
+
 function syncJSON() {
     document.getElementById('questions_json').value = JSON.stringify(questions);
 }
@@ -179,12 +210,13 @@ function renderQ() {
     const list = document.getElementById('ra-q-list');
     list.innerHTML = '';
 
-    if (questions.length === 0) {
-        list.innerHTML = '<div class="text-muted font-italic text-center py-3">No questions added yet.</div>';
-        return;
-    }
+    let visibleCount = 0;
 
     questions.forEach((q, idx) => {
+        let qLevel = parseInt(q.level_idx || 0);
+        if (qLevel !== currentEditLevel) return; // Hide questions for other tabs
+
+        visibleCount++;
         const card = document.createElement('div');
         card.style = "background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);";
         
@@ -291,12 +323,6 @@ function renderQ() {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-weight: 800; color: #1e293b;">#${idx + 1}</span>
                     <span style="background: ${typeColor}; color: #ffffff; padding: 3px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 700;">${typeName}</span>
-                    <select class="form-control form-control-sm" style="width: auto; font-size: 0.8rem;" onchange="updateQProp(${idx}, 'level_idx', parseInt(this.value))">
-                        <option value="0" ${levelIdx === 0 ? "selected" : ""}>Show on Level 1 (Independent)</option>
-                        <option value="1" ${levelIdx === 1 ? "selected" : ""}>Show on Level 2 (Instructional)</option>
-                        <option value="2" ${levelIdx === 2 ? "selected" : ""}>Show on Level 3 (Frustration)</option>
-                        <option value="3" ${levelIdx === 3 ? "selected" : ""}>Show on Level 4 (Non-Reader)</option>
-                    </select>
                 </div>
                 <div style="display: flex; gap: 6px;">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveQ(${idx}, -1)" ${idx === 0 ? "disabled" : ""}>⬆</button>
@@ -308,12 +334,17 @@ function renderQ() {
         `;
         list.appendChild(card);
     });
+
+    if (visibleCount === 0) {
+        list.innerHTML = '<div class="text-muted font-italic text-center py-3">No questions added for this level yet.</div>';
+    }
+
     syncJSON();
 }
 
 window.addQ = function() {
     const type = document.getElementById('ra-q-type-add').value;
-    let newQ = { type: type, question: "" };
+    let newQ = { type: type, question: "", level_idx: currentEditLevel };
     if (type === 'multichoice') {
         newQ.options = ["Option 1", "Option 2"];
         newQ.correct = 0;
