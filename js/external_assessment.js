@@ -45,6 +45,19 @@ window.ExternalReadingAssessment = (function() {
              .replace(/'/g, "&#039;");
     }
 
+    function isReversal(target, spoken) {
+        if (!target || !spoken) return false;
+        let t = target.toLowerCase().replace(/[^\w]/g, "");
+        let s = spoken.toLowerCase().replace(/[^\w]/g, "");
+        if (t === s || t.length < 2) return false;
+        
+        if (t === s.split('').reverse().join('')) return true;
+        if (t.split('').sort().join('') === s.split('').sort().join('')) return true;
+        
+        return false;
+    }
+
+    let globalReadOrder = 0;
 
     function renderPhilIriLive() {
         const container = document.getElementById("ra-philiri-transcript");
@@ -58,11 +71,20 @@ window.ExternalReadingAssessment = (function() {
             let spoken = state.spoken;
             
             let remainingInsertions = state.insertionsBefore;
-            // Deduce Substitution: If Omission but there is an Insertion right before it
+            // Deduce Substitution or Reversal: If Omission but there is an Insertion right before it
             if (err === "Omission" && state.insertionsBefore.length > 0) {
-                err = "Substitution";
-                spoken = state.insertionsBefore.join(" ");
+                let subSpoken = state.insertionsBefore.join(" ");
+                if (isReversal(token, subSpoken)) {
+                    err = "Reversal";
+                } else {
+                    err = "Substitution";
+                }
+                spoken = subSpoken;
                 remainingInsertions = []; // Locally clear it so it doesn't double-render as an insertion
+            } else if (err === "Mispronunciation") {
+                if (isReversal(token, spoken)) {
+                    err = "Reversal";
+                }
             }
 
             let topAnnotation = "";
@@ -85,7 +107,14 @@ window.ExternalReadingAssessment = (function() {
                 if (spoken !== "") wordStyle = "color: #059669;"; 
             } else if (err === "Mispronunciation") {
                 wordStyle = "color: #d97706; text-decoration: underline; text-decoration-color: #d97706;";
-                bottomAnnotation = spoken;
+                let t = token.toLowerCase().replace(/[^\w]/g, "");
+                let s = spoken.toLowerCase().replace(/[^\w]/g, "");
+                if (t !== s) {
+                    topAnnotation = spoken;
+                }
+            } else if (err === "Reversal") {
+                wordStyle = "color: #e11d48;"; // Rose Red
+                topAnnotation = spoken;
             } else if (err === "Omission") {
                 wordStyle = "color: #dc2626; border: 1px solid #dc2626; border-radius: 50%; padding: 0 4px;";
             } else if (err === "Substitution") {
@@ -93,6 +122,9 @@ window.ExternalReadingAssessment = (function() {
                 topAnnotation = spoken;
             } else if (err === "Repetition") {
                 wordStyle = "text-decoration: underline; text-decoration-style: wavy; text-decoration-color: #eab308;";
+            } else if (err === "Transposition") {
+                wordStyle = "color: #9333ea; border-bottom: 2px dashed #9333ea;"; // Purple dashed line
+                topAnnotation = "⇌";
             }
 
             html += `<span style="display: inline-flex; flex-direction: column; align-items: center; vertical-align: bottom; margin: 0 2px; line-height: 1.2;">
@@ -451,6 +483,7 @@ window.ExternalReadingAssessment = (function() {
         const rawWords = rawText.split(/\s+/);
         passageTokens = [];
         philIriState = [];
+        globalReadOrder = 0;
         let html = "";
         rawWords.forEach((word, idx) => {
             if (word.trim().length > 0) {
@@ -484,6 +517,7 @@ window.ExternalReadingAssessment = (function() {
         currentPassageIndex = 0;
         noMatchCount = 0;
         totalMiscuesCount = 0;
+        globalReadOrder = 0;
         
         const vadIndicator = document.getElementById("ra-vad-indicator");
         if (vadIndicator) vadIndicator.classList.remove("ra-vad-active");
@@ -849,10 +883,17 @@ window.ExternalReadingAssessment = (function() {
                                             }
                                             
                                             // --- Phil-IRI Sequence Tracker ---
-                                            if (passageIdx < passageTokens.length) {
-                                                if (err === "Insertion") {
-                                                    philIriState[passageIdx].insertionsBefore.push(wordText);
-                                                } else {
+                                            if (err === "Insertion") {
+                                                let targetIdx = passageIdx < passageTokens.length ? passageIdx : passageTokens.length - 1;
+                                                if (targetIdx >= 0) {
+                                                    philIriState[targetIdx].insertionsBefore.push(wordText);
+                                                }
+                                            } else if (passageIdx < passageTokens.length) {
+                                                    if (!philIriState[passageIdx].readOrder) {
+                                                        globalReadOrder++;
+                                                        philIriState[passageIdx].readOrder = globalReadOrder;
+                                                    }
+
                                                     // Record skipped words as Omissions
                                                     if (oldPassageIndex < passageIdx) {
                                                         for (let i = oldPassageIndex; i < passageIdx; i++) {
@@ -868,7 +909,6 @@ window.ExternalReadingAssessment = (function() {
                                                         philIriState[passageIdx].status = err;
                                                         philIriState[passageIdx].spoken = wordText;
                                                     }
-                                                }
                                             }
                                             
                                             if (err === "None") {
@@ -983,11 +1023,38 @@ window.ExternalReadingAssessment = (function() {
                                             }
                                         });
 
+                                        // Pass 1: Detect Transpositions
+                                        for (let i = 0; i < passageTokens.length - 1; i++) {
+                                            let s1 = philIriState[i];
+                                            let s2 = philIriState[i+1];
+                                            if (s1 && s2 && s1.readOrder && s2.readOrder && s1.readOrder === s2.readOrder + 1) {
+                                                // s1 (first word) must be the backward jump, and s2 must not have been repeated later
+                                                if (s1.status === "Repetition" && s2.status !== "Repetition") {
+                                                    s1.status = "Transposition";
+                                                    s2.status = "Transposition";
+                                                }
+                                            }
+                                        }
+
                                         // Recalculate Phil-IRI Miscues Native Count from the Sequence Tracker
                                         let computedMiscues = 0;
-                                        philIriState.forEach(st => {
+                                        let skipNextTransposition = false;
+                                        philIriState.forEach((st, idx) => {
+                                            // Handle Transposition pairs (only count 1 error for the swapped pair)
+                                            if (st.status === "Transposition") {
+                                                if (skipNextTransposition) {
+                                                    skipNextTransposition = false;
+                                                } else {
+                                                    computedMiscues++;
+                                                    skipNextTransposition = true;
+                                                }
+                                                computedMiscues += st.insertionsBefore.length;
+                                                return;
+                                            }
+                                            
+                                            // Normal deduction
                                             if (st.status === "Omission" && st.insertionsBefore.length > 0) {
-                                                computedMiscues++; // Substitution counts as 1 miscue
+                                                computedMiscues++; // Substitution or Reversal counts as 1 miscue
                                                 computedMiscues += (st.insertionsBefore.length - 1); // Extra insertions
                                             } else {
                                                 if (st.status !== "None") computedMiscues++;

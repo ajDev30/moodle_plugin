@@ -1,147 +1,29 @@
-================================================================================
-REFERENCES & SOURCE VERIFICATION LOG - CHAPTER 1
-Project: Voice-Based Reading Assessment System (ARAL Reading Program)
-Document: Buena.etal_Rev_Chapter1.docx
-================================================================================
+THEME 1:
+Cadime, I., et al. (2022). An Intervention in Reading Disabilities Using a Digital Tool During the COVID-19 Pandemic. Frontiers in Psychology, 13. https://doi.org/10.3389/fpsyg.2022.876485
+Pocaan, J. M., et al. (2022). Strategic reading intervention for left-behind learners in the Philippines. LLT Journal, 25(2), 367-378. https://doi.org/10.24071/llt.v25i2.5087
+Iyare, N. F., et al. (2018). The Effectiveness of Integrating Interactive Technology in Reading Comprehension... JITE:Research, 17, 227-246. https://doi.org/10.28945/4098
+Bete, R. P. (2025). Bridging Reading Gaps: Analyzing the Impact of the National Reading Program on Grade 1 to 3 Learners in Kiliog Elementary School. IJRISS, 9(5). https://doi.org/10.47772/IJRISS.2025.905000275
+Heydarnejad, T., et al. (2022). The impacts of performance-based assessment... Language Testing in Asia, 12(1), Article 51. https://doi.org/10.1186/s40468-022-00202-4
+Abdulaal, M. A. A., et al. (2022). Dynamic vs. diagnostic assessment: Impacts on EFL learners’ speaking fluency and accuracy... Language Testing in Asia, 12(1), Article 32. https://doi.org/10.1186/s40468-022-00179-0
 
---------------------------------------------------------------------------------
-SECTION A: CHAPTER 1 LITERATURE & RRL REFERENCES (WITH VERIFICATION LINKS)
---------------------------------------------------------------------------------
+THEME 2:
+Kwon, S., et al. (2021). The identity changes in online learning and teaching: Instructors, learners, and learning management systems. IJETHE, 18(1), Article 67. https://doi.org/10.1186/s41239-021-00304-8
+Ritonga, M., et al. (2022). Assessment and language improvement: The effect of peer assessment (PA) on reading comprehension... Language Testing in Asia, 12(1), Article 36. https://doi.org/10.1186/s40468-022-00188-z
 
-1. Chen, Y. C., Chen, N. S., & Lin, Y. T. (2024). Integrating artificial intelligence and extended reality in language education: A systematic literature review (2017–2024). Education Sciences, 15(8), 1066.
-   Verification URL: https://doi.org/10.3390/educsci15081066
+THEME 3:
+Moxon, S. (2024). ALL-TALK: Enhancing EFL Pronunciation With Microsoft Azure Speech Services. ABAC Journal, 44(4), 139-161. https://doi.org/10.59865/abacj.2024.58
+Zhang, J., et al. (2021). Speechocean762: An Open-Source Non-Native English Speech Corpus for Pronunciation Assessment. Proceedings of Interspeech 2021. https://doi.org/10.21437/Interspeech.2021-1259
+Witt, S. M., & Young, S. J. (2000). Phone-level pronunciation scoring and assessment for interactive language learning. Speech Communication, 30(2-3), 95-108. https://doi.org/10.1016/S0167-6393(99)00044-8
+Gao, L., et al. (2024). Reading Miscue Detection in Primary School through Automatic Speech Recognition. Interspeech 2024. https://doi.org/10.21437/Interspeech.2024-1180
+Radford, A., et al. (2023). Robust Speech Recognition via Large-Scale Weak Supervision. ICML 2023. https://proceedings.mlr.press/v202/radford23a.html
+Molenaar, B., et al. (2023). Automatic assessment of oral reading accuracy for reading diagnostics. Proceedings of Interspeech 2023. https://doi.org/10.21437/Interspeech.2023-1681
+Bailly, G., et al. (2022). Automatic assessment of oral readings of young pupils. Speech Communication, 138, 67-79. https://doi.org/10.1016/j.specom.2022.01.008
+Inceoglu, S., et al. (2023). Assessment of L2 intelligibility: Comparing L1 listeners and automatic speech recognition. ReCALL, 35(1), 89-104. https://doi.org/10.1017/S0958344022000192
+Kim, E., et al. (2022). Automatic pronunciation assessment using self-supervised speech representation learning. Proceedings of Interspeech 2022. https://doi.org/10.21437/Interspeech.2022-10245
+Saito, K., et al. (2023). Automated assessment of second language comprehensibility: Review, training, validation, and generalization studies. Studies in Second Language Acquisition, 45(1), 234-263. https://doi.org/10.1017/S0272263122000080
+Python Software Foundation. (2024). difflib — Helpers for computing deltas. Python 3 Documentation. https://docs.python.org/3/library/difflib.html
 
-2. Ludewig, U., Kleinkorres, R., Schaufelberger, R., & McElvany, N. (2022). The COVID-19 pandemic and student achievement in reading: A longitudinal analysis. Frontiers in Psychology, 13, 876485.
-   Verification URL: https://doi.org/10.3389/fpsyg.2022.876485
-
-3. Kuhfeld, M., Lewis, K., & Peltier, T. (2023). Reading achievement declines during the COVID-19 pandemic: Evidence from 5 million U.S. students. Educational Researcher.
-   Verification URL: https://doi.org/10.3102/0013189X231153112
-
-4. Hayati, H. A., & Puspitaloka, N. (2022). An analysis of students’ reading comprehension difficulties during the COVID-19 pandemic. Journal of English Teaching, 8(2), 123–134.
-   Verification URL: https://www.researchgate.net/publication/364464529
-
-5. Stanford Graduate School of Education. (2021). New Stanford study sheds light on how much learning young students have lost during stages of the pandemic.
-   Verification URL: https://ed.stanford.edu/news/new-stanford-study-sheds-light-how-much-learning-young-students-have-lost-during-stages
-
-6. Department of Education. (2024). Academic Recovery and Accessible Learning (ARAL) Program. Republic Act No. 12028.
-   Verification URL: https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/97912
-
-7. IBM. (n.d.). What is artificial intelligence (AI)? IBM Think Topics.
-   Verification URL: https://www.ibm.com/think/topics/artificial-intelligence
-
-8. Cambridge University Press & Assessment. (n.d.). Comprehension. Cambridge Dictionary.
-   Verification URL: https://dictionary.cambridge.org/dictionary/english/comprehension
-
-9. Power, D. J. (2007). A brief history of decision support systems. DSSResources.COM.
-   Verification URL: http://dssresources.com/history/dsshistory.html
-
-10. Microsoft Azure. (2025). Pronunciation assessment documentation and developer guide. Microsoft Learn.
-    Verification URL: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment
-
-11. Python Software Foundation. (2025). difflib — Helpers for computing deltas. Python 3 Documentation.
-    Verification URL: https://docs.python.org/3/library/difflib.html
-
-12. Witt, S. M., & Young, S. J. (2000). Phone-level pronunciation scoring and assessment for interactive language learning. Speech Communication, 30(2-3), 95-108.
-    Verification URL: https://doi.org/10.1016/S0167-6393(99)00044-8
-
-13. Microsoft Azure. (2024). Speech service overview: Speech-to-text and Neural Text-to-Speech. Microsoft Learn.
-    Verification URL: https://azure.microsoft.com/en-us/products/ai-services/speech-to-text
-
-14. TiloRes. (n.d.). Metaphone phonetic algorithm online tool.
-    Verification URL: https://tilores.io/metaphone-phonetic-algorithm-online-tool
-
-15. Cambridge University Press & Assessment. (n.d.). Pronunciation. Cambridge Dictionary.
-    Verification URL: https://dictionary.cambridge.org/dictionary/english/pronunciation
-
-16. E., Johnson, J., & William, B. (2025). Real-Time Feedback Systems in Assistive E-Learning: A Step Toward Inclusive Education. ResearchGate.
-    Verification URL: https://www.researchgate.net/publication/389891863_RealTime_Feedback_Systems_in_Assistive_E_Learning_A_Step_Toward_Inclusive_Education
-
-17. Hu, C., & Downie, A. (n.d.). What is speech-to-text? IBM Think.
-    Verification URL: https://www.ibm.com/think/topics/speech-to-text
-
-18. Cambridge University Press & Assessment. (n.d.). Voice recognition. Cambridge Dictionary.
-    Verification URL: https://dictionary.cambridge.org/dictionary/english/voice-recognition
-
-19. IBM. (n.d.). What is zero-shot learning? IBM Think.
-    Verification URL: https://www.ibm.com/think/topics/zero-shot-learning
-
-
---------------------------------------------------------------------------------
-SECTION B: DEFINITION OF TERMS SOURCES & VERIFICATION LINKS
---------------------------------------------------------------------------------
-
-1. ARAL Reading Program
-   Term: "ARAL Reading Program"
-   Source / Document: Department of Education / Republic Act No. 12028 (2024)
-   Verification URL: https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/97912
-
-2. Artificial Intelligence
-   Term: "Artificial Intelligence"
-   Source: IBM Think Topics (n.d.)
-   Verification URL: https://www.ibm.com/think/topics/artificial-intelligence
-
-3. Azure Speech SDK
-   Term: "Azure Speech SDK"
-   Source: Microsoft Azure Cognitive Services Documentation (2025)
-   Verification URL: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/overview
-
-4. Comprehension
-   Term: "Comprehension"
-   Source: Cambridge Dictionary (n.d.)
-   Verification URL: https://dictionary.cambridge.org/dictionary/english/comprehension
-
-5. Dialectal Accent
-   Term: "Dialectal Accent"
-   Source: Cambridge Dictionary & Phonetic Variations Literature
-   Verification URL: https://dictionary.cambridge.org/dictionary/english/dialect
-
-6. difflib (SequenceMatcher Algorithm)
-   Term: "difflib (SequenceMatcher Algorithm)"
-   Source: Python Software Foundation Standard Library Documentation (2025)
-   Verification URL: https://docs.python.org/3/library/difflib.html
-
-7. Goodness of Pronunciation (GOP) / Phoneme-level Assessment
-   Term: "Goodness of Pronunciation (GOP)"
-   Source: Microsoft Azure Pronunciation Assessment Guide & Witt & Young (2000)
-   Verification URL 1: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment
-   Verification URL 2: https://doi.org/10.1016/S0167-6393(99)00044-8
-
-8. Phonemes
-   Term: "Phonemes"
-   Source: Cambridge Dictionary (n.d.)
-   Verification URL: https://dictionary.cambridge.org/dictionary/english/phoneme
-
-9. Pronunciation
-   Term: "Pronunciation"
-   Source: Cambridge Dictionary (n.d.)
-   Verification URL: https://dictionary.cambridge.org/dictionary/english/pronunciation
-
-10. Reading Fluency
-    Term: "Reading Fluency"
-    Source: Philippine Informal Reading Inventory (Phil-IRI) Manual (DepEd)
-    Verification URL: https://www.deped.gov.ph/wp-content/uploads/2018/07/Phil-IRI-Manual-v3.pdf
-
-11. Real-Time Feedback
-    Term: "Real-Time Feedback"
-    Source: ResearchGate Assistive E-Learning Study (2025)
-    Verification URL: https://www.researchgate.net/publication/389891863_RealTime_Feedback_Systems_in_Assistive_E_Learning_A_Step_Toward_Inclusive_Education
-
-12. Speech-to-Text
-    Term: "Speech-to-Text"
-    Source: IBM Think Topics (n.d.)
-    Verification URL: https://www.ibm.com/think/topics/speech-to-text
-
-13. Text-to-Speech (TTS)
-    Term: "Text-to-Speech (TTS)"
-    Source: Microsoft Azure Neural Text-to-Speech Guide (2025)
-    Verification URL: https://learn.microsoft.com/en-us/azure/ai-services/speech-service/text-to-speech
-
-14. Voice Recognition
-    Term: "Voice Recognition"
-    Source: Cambridge Dictionary (n.d.)
-    Verification URL: https://dictionary.cambridge.org/dictionary/english/voice-recognition
-
-15. Zero-shot
-    Term: "Zero-shot"
-    Source: IBM Think Topics (n.d.)
-    Verification URL: https://www.ibm.com/think/topics/zero-shot-learning
+THEME 4:
+Department of Education. (2018). Philippine Informal Reading Inventory (Phil-IRI) manual for Grade 1 to Grade 6. Department of Education. https://www.deped.gov.ph/wp-content/uploads/2018/07/Phil-IRI-Manual-v3.pdf
+Congress of the Philippines. (2024). Republic Act No. 12028: Academic Recovery and Accessible Learning (ARAL) Program Act. Official Gazette of the Republic of the Philippines. https://elibrary.judiciary.gov.ph/thebookshelf/showdocs/2/97912
+Chugyawi, C. L. (2024). Navigating Linguistic Challenges: Analyzing Oral Reading Miscues of Multilingual Learners. IJRP, 156(1). https://doi.org/10.47119/IJRP100142120246112

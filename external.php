@@ -254,13 +254,15 @@ if (empty($token)) {
                     <strong>Legend:</strong><br>
                     <div class="row mt-2">
                         <div class="col-md-6">
-                            <div><span style="text-decoration:underline; font-weight:bold;">Mispronunciation</span> - Underlined with spoken word below</div>
-                            <div><span style="border: 1px solid #d32f2f; border-radius: 50%; padding: 0 4px; font-weight:bold;">Omission</span> - Circled with red border</div>
-                            <div><span style="color:#388e3c; font-weight:bold;">^</span> <strong>Insertion</strong> - Caret with inserted word above</div>
+                            <div><span style="color: #d97706; text-decoration: underline; font-weight:bold;">Mispronunciation</span> - Underlined with spoken word above</div>
+                            <div><span style="color: #dc2626; border: 1px solid #dc2626; border-radius: 50%; padding: 0 4px; font-weight:bold;">Omission</span> - Circled with red border</div>
+                            <div><span style="color: #059669; font-weight:bold;">^ Insertion</span> - Caret with inserted word above</div>
+                            <div><span style="color: #2563eb; text-decoration: line-through; font-weight:bold;">Substitution</span> - Blue strikethrough with replaced word above</div>
                         </div>
                         <div class="col-md-6">
-                            <div><span style="border-bottom: 2px wavy #fbc02d; font-weight:bold;">Repetition</span> - Wavy yellow underline</div>
-                            <div><span style="font-weight:bold; color:#1976d2;">Substitution</span> - Replaced word written above</div>
+                            <div><span style="text-decoration: underline; text-decoration-style: wavy; text-decoration-color: #eab308; font-weight:bold;">Repetition</span> - Wavy yellow underline</div>
+                            <div><span style="color: #9333ea; border-bottom: 2px dashed #9333ea; font-weight:bold;">Transposition</span> - Purple dashed line with ⇌ symbol above</div>
+                            <div><span style="color: #e11d48; font-weight:bold;">Reversal</span> - Rose red text with reversed word above</div>
                         </div>
                     </div>
                 </div>
