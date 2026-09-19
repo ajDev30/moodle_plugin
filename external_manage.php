@@ -54,17 +54,114 @@ $total_profiles = $DB->count_records('readingassessment_ext_prof');
 $total_attempts = $DB->count_records('readingassessment_ext_att');
 
 // Recent attempts
-$sql = "SELECT att.id, prof.fullname, prof.lrn, prof.gender, prof.age, prof.grade_level, pass.title AS passage_title, pass.questions_json, att.accuracy_score, att.comprehension_score, att.classification, att.timecompleted, att.level_idx, att.answers_json, att.miscues_json, pass.passage, pass.passage_2, pass.passage_3, pass.passage_4 
-        FROM {readingassessment_ext_att} att
-        JOIN {readingassessment_ext_prof} prof ON att.profileid = prof.id
-        LEFT JOIN {readingassessment_ext_pass} pass ON prof.grade_level = pass.grade_level
-        ORDER BY att.timecompleted DESC LIMIT 50";
-$recent_attempts = $DB->get_records_sql($sql);
+
+// Handle manual grading submission
+$action_grade = optional_param('action', '', PARAM_ALPHA);
+if ($action_grade === 'manual_grade' && data_submitted()) {
+    require_sesskey();
+    $att_id = required_param('att_id', PARAM_INT);
+    
+    $attempt = $DB->get_record('readingassessment_ext_att', ['id' => $att_id]);
+    if ($attempt) {
+        $answers = json_decode($attempt->answers_json, true) ?: [];
+        $profile = $DB->get_record('readingassessment_ext_prof', ['id' => $attempt->profileid]);
+        $passage_record = $DB->get_record('readingassessment_ext_pass', ['grade_level' => $profile->grade_level]);
+        
+        $total_earned = 0;
+        $total_max = 0;
+        
+        if ($passage_record && !empty($passage_record->questions_json)) {
+            $all_questions = json_decode($passage_record->questions_json, true) ?: [];
+            $custom_questions = [];
+            foreach ($all_questions as $q) {
+                $q_level = isset($q['level_idx']) ? (int)$q['level_idx'] : 0;
+                if ($q_level === (int)$attempt->level_idx) {
+                    $custom_questions[] = $q;
+                }
+            }
+            
+            foreach ($custom_questions as $qidx => $q) {
+                $qtype = $q['type'] ?? 'multichoice';
+                if ($qtype === 'description') continue;
+                
+                $ans = $answers[$qidx] ?? null;
+                
+                if ($qtype === 'shortanswer' || $qtype === 'essay') {
+                    $total_max += 1.0;
+                    $manual_pts = optional_param('manual_grade_' . $qidx, 0, PARAM_FLOAT);
+                    $total_earned += $manual_pts;
+                } else if ($qtype === 'multichoice') {
+                    $total_max += 1.0;
+                    if ($ans !== null && intval($ans) === intval($q['correct'] ?? 0)) $total_earned += 1.0;
+                } else if ($qtype === 'truefalse') {
+                    $total_max += 1.0;
+                    $expected = ($q['correct'] === true || $q['correct'] === 'true' || $q['correct'] === 1);
+                    $actual   = ($ans === true || $ans === 'true' || $ans === 1 || strtolower($ans) === 'true');
+                    if ($ans !== null && $expected === $actual) $total_earned += 1.0;
+                } else if ($qtype === 'matching') {
+                    $pairs = $q['pairs'] ?? [];
+                    foreach ($pairs as $pidx => $p) {
+                        $total_max += 1.0; 
+                        $expected_ans = trim(strtolower($p['answer'] ?? ''));
+                        $student_val = $ans[$pidx] ?? '';
+                        if ($expected_ans !== '' && $expected_ans === trim(strtolower($student_val))) $total_earned += 1.0;
+                    }
+                }
+            }
+        }
+        
+        $comprehension = ($total_max > 0) ? round(($total_earned / $total_max) * 100.0, 2) : 100.0;
+        $attempt->comprehension_score = $comprehension;
+        
+        $current_passage_text = '';
+        if ($attempt->level_idx == 0) $current_passage_text = $passage_record->passage;
+        else if ($attempt->level_idx == 1) $current_passage_text = $passage_record->passage_2;
+        else if ($attempt->level_idx == 2) $current_passage_text = $passage_record->passage_3;
+        else if ($attempt->level_idx == 3) $current_passage_text = $passage_record->passage_4;
+        
+        $passage_words = count(preg_split('/\s+/', preg_replace('/[^a-z0-9]/', ' ', strtolower(trim($current_passage_text)))));
+        if ($passage_words == 0) $passage_words = 1;
+        
+        $miscues_arr = json_decode($attempt->miscues_json, true) ?: [];
+        $words_attempted = count($miscues_arr);
+        $word_reading_score = round(max(0, (($passage_words - $words_attempted) / $passage_words) * 100), 2);
+        
+        if ($attempt->level_idx == 3) {
+            if ($comprehension >= 80) $classification = 'Listening: Independent';
+            else if ($comprehension >= 59) $classification = 'Listening: Instructional';
+            else $classification = 'Listening: Frustration';
+        } else {
+            if ($word_reading_score < 40 || ($attempt->reading_time < 5 && $word_reading_score < 70)) {
+                $classification = 'Non-Reader';
+            } else if ($word_reading_score >= 97 && $comprehension >= 80) {
+                $classification = 'Independent';
+            } else if ($word_reading_score >= 90 && $comprehension >= 59) {
+                $classification = 'Instructional';
+            } else {
+                $classification = 'Frustration';
+            }
+        }
+        
+        $attempt->classification = $classification;
+        $attempt->timecompleted = time();
+        $DB->update_record('readingassessment_ext_att', $attempt);
+        redirect(new moodle_url('/mod/readingassessment/external_manage.php'), 'Grade saved successfully.', null, '\core\output\notification::NOTIFY_SUCCESS');
+    }
+}
+
+// Get all profiles with attempts, sorted by latest activity
+$sql = "SELECT p.*, MAX(a.timecompleted) as last_completed 
+        FROM {readingassessment_ext_prof} p
+        JOIN {readingassessment_ext_att} a ON a.profileid = p.id
+        GROUP BY p.id, p.token, p.fullname, p.lrn, p.gender, p.age, p.grade_level, p.consent_agreed, p.timecreated
+        ORDER BY last_completed DESC LIMIT 50";
+$recent_profiles = $DB->get_records_sql($sql);
+
 
 ?>
 
 <div class="container-fluid mt-4">
-    <div class="row">
+    <div class="row" id="dashboard-main-view">
         <!-- Sidebar / Setup -->
         <div class="col-md-4">
             <div class="card mb-4 shadow-sm">
@@ -121,7 +218,7 @@ $recent_attempts = $DB->get_records_sql($sql);
                     <h5 class="mb-0">📊 Recent Submissions</h5>
                 </div>
                 <div class="card-body p-0">
-                    <?php if (empty($recent_attempts)): ?>
+                                        <?php if (empty($recent_profiles)): ?>
                         <div class="p-4 text-center text-muted">No external test submissions yet.</div>
                     <?php else: ?>
                         <div class="table-responsive">
@@ -130,57 +227,77 @@ $recent_attempts = $DB->get_records_sql($sql);
                                     <tr>
                                         <th>Date</th>
                                         <th>Student</th>
-                                        <th>Grade</th>
-                                        <th>Acc.</th>
-                                        <th>Comp.</th>
                                         <th>Classification</th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach ($recent_attempts as $att): ?>
+                                    <?php foreach ($recent_profiles as $prof): 
+                                        // Get all attempts for this profile ordered by level
+                                        $attempts = $DB->get_records('readingassessment_ext_att', ['profileid' => $prof->id], 'level_idx ASC');
+                                        if (empty($attempts)) continue;
+                                        $last_att = end($attempts);
+                                        
+                                        $passage_record = $DB->get_record('readingassessment_ext_pass', ['grade_level' => $prof->grade_level]);
+                                        $levelNames = [0 => 'Independent', 1 => 'Instructional', 2 => 'Frustration', 3 => 'Non-Reader'];
+?>
                                         <tr>
-                                            <td><?php echo userdate($att->timecompleted, '%b %d, %H:%M'); ?></td>
+                                            <td><?php echo userdate($last_att->timecompleted, '%b %d, %H:%M'); ?></td>
                                             <td>
-                                                <strong><?php echo s($att->fullname); ?></strong><br>
-                                                <small class="text-muted">LRN: <?php echo s($att->lrn); ?></small><br>
-                                                <small class="text-muted"><?php echo s($att->gender); ?>, <?php echo s($att->age); ?> yrs old</small>
+                                                <strong><?php echo s($prof->fullname); ?></strong><br>
+                                                <small class="text-muted">LRN: <?php echo s($prof->lrn); ?></small><br>
+                                                <small class="text-muted"><?php echo s($prof->gender); ?>, <?php echo s($prof->age); ?> yrs old</small>
                                             </td>
-                                            <td>
-                                                <?php echo !empty($att->passage_title) ? s($att->passage_title) : 'Grade ' . $att->grade_level; ?>
-                                                <br><small class="text-muted">Level <?php echo (isset($att->level_idx) ? $att->level_idx : 0) + 1; ?></small>
-                                            </td>
-                                            <td><?php echo $att->accuracy_score; ?>%</td>
-                                            <td><?php echo $att->comprehension_score; ?>%</td>
                                             <td>
                                                 <span class="badge badge-<?php 
-                                                    if ($att->classification === 'Independent') echo 'success';
-                                                    else if ($att->classification === 'Instructional') echo 'info';
-                                                    else if ($att->classification === 'Frustration') echo 'warning';
-                                                    else if ($att->classification === 'Non-Reader') echo 'danger';
+                                                    if (strpos($last_att->classification, 'Independent') !== false) echo 'success';
+                                                    else if (strpos($last_att->classification, 'Instructional') !== false) echo 'info';
+                                                    else if (strpos($last_att->classification, 'Frustration') !== false) echo 'warning';
+                                                    else if (strpos($last_att->classification, 'Non-Reader') !== false) echo 'danger';
                                                     else echo 'secondary';
                                                 ?>">
-                                                    <?php echo s($att->classification ?: 'Pending'); ?>
+                                                    <?php echo s($last_att->classification ?: 'Pending'); ?>
                                                 </span>
                                             </td>
                                             <td>
-                                                <?php
-                                                    $lvl = isset($att->level_idx) ? (int)$att->level_idx : 0;
-                                                    $passage_text = '';
-                                                    if ($lvl === 0) $passage_text = $att->passage;
-                                                    else if ($lvl === 1) $passage_text = $att->passage_2;
-                                                    else if ($lvl === 2) $passage_text = $att->passage_3;
-                                                    else if ($lvl === 3) $passage_text = $att->passage_4;
+                                                <?php 
+                                                    $att_data = [];
+                                                    for ($i=0; $i<4; $i++) {
+                                                        $has_attempt = false;
+                                                        foreach ($attempts as $a) {
+                                                            if ((int)$a->level_idx === $i) {
+                                                                $ptext = '';
+                                                                if ($passage_record) {
+                                                                    if ($i === 0) $ptext = $passage_record->passage;
+                                                                    else if ($i === 1) $ptext = $passage_record->passage_2;
+                                                                    else if ($i === 2) $ptext = $passage_record->passage_3;
+                                                                    else if ($i === 3) $ptext = $passage_record->passage_4;
+                                                                }
+                                                                $att_data[] = [
+                                                                    'id' => $a->id,
+                                                                    'level_idx' => $i,
+                                                                    'test_name' => $levelNames[$i],
+                                                                    'passage_text' => $ptext,
+                                                                    'questions_json' => $passage_record->questions_json ?? '[]',
+                                                                    'answers_json' => $a->answers_json,
+                                                                    'miscues_json' => $a->miscues_json,
+                                                                    'evaluation_data' => $a->evaluation_data,
+                                                                    'classification' => $a->classification ?: 'Pending',
+                                                                    'transcript' => $a->transcript,
+                                                                    'wpm' => $a->reading_speed,
+                                                                    'comp' => $a->comprehension_score,
+                                                                    'student_name' => $prof->fullname
+                                                                ];
+                                                                $has_attempt = true;
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                    $att_json = json_encode($att_data);
                                                 ?>
-                                                <button class="btn btn-sm btn-outline-primary" onclick="viewAnswers(this)" 
-                                                    data-answers="<?php echo s($att->answers_json); ?>" 
-                                                    data-questions="<?php echo s($att->questions_json); ?>" 
-                                                    data-miscues="<?php echo s($att->miscues_json); ?>" 
-                                                    data-evaluation="<?php echo s($att->evaluation_data ?? '{}'); ?>" 
-                                                    data-student="<?php echo s($att->fullname); ?>"
-                                                    data-passage="<?php echo s($passage_text); ?>"
-                                                    data-attid="<?php echo $att->id; ?>"
-                                                >View</button>
+                                                <button class=\"btn btn-sm btn-outline-primary\" onclick='viewStudentAnswers(this, <?php echo $prof->id; ?>)' data-attempts='<?php echo s($att_json); ?>'>
+                                                    View
+                                                </button>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -194,206 +311,364 @@ $recent_attempts = $DB->get_records_sql($sql);
     </div>
 </div>
 
-<!-- Modal -->
-<div class="modal fade" id="answersModal" tabindex="-1" role="dialog">
-  <div class="modal-dialog modal-lg" role="document">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">Student Submission: <span id="modalStudentName"></span></h5>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-          <span aria-hidden="true">&times;</span>
-        </button>
-      </div>
-      <div class="modal-body" id="modalAnswersBody">
-        <p class="text-muted">Loading...</p>
-      </div>
+
+    <div class="row d-none" id="dashboard-details-view">
+        <div class="col-12">
+            <div class="card shadow-sm border-0 mb-5">
+                <div class="card-header bg-white border-bottom p-3 d-flex align-items-center">
+                    <button class="btn btn-outline-secondary mr-3" onclick="closeDetailsView()">⬅️ Back to Submissions</button>
+                    <h4 class="mb-0 text-primary" id="details-student-name">Student Name</h4>
+                </div>
+                <div class="card-body p-4" id="details-content-area" style="background: #f8f9fa;">
+                    <!-- JS will render here -->
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
+
+<!-- Modal -->
+
 </div>
 
 <script>
-function copyLink() {
-    var copyText = document.getElementById("publicLink");
-    copyText.select();
-    copyText.setSelectionRange(0, 99999);
-    document.execCommand("copy");
-    alert("Copied link: " + copyText.value);
+let stateData = {};
+
+function escapeHtml(unsafe) {
+    if (!unsafe) return '';
+    return unsafe.toString()
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
 }
 
-function viewAnswers(btn) {
-    const student = btn.getAttribute('data-student');
-    const answersRaw = btn.getAttribute('data-answers');
-    const questionsRaw = btn.getAttribute('data-questions');
+function viewStudentAnswers(btn, profId) {
+    const attemptRaw = btn.getAttribute('data-attempts');
+    if (!attemptRaw) return;
+    const attempts = JSON.parse(attemptRaw);
+    if (attempts.length === 0) return;
     
-    document.getElementById('modalStudentName').textContent = student;
-    const body = document.getElementById('modalAnswersBody');
+    stateData['current_prof'] = profId;
+    stateData[profId] = attempts;
     
-    try {
-        const answers = JSON.parse(answersRaw || '{}');
-        const questions = JSON.parse(questionsRaw || '[]');
-        
-        function escapeHtml(str) {
-            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-        }
-        
-        let html = '<h6 class="font-weight-bold mb-3">Comprehension Answers</h6>';
-        
-        if (Object.keys(answers).length === 0) {
-            html += '<p class="text-muted">No answers recorded.</p>';
-        } else {
-            html += '<table class="table table-bordered table-sm">';
-            html += '<thead class="thead-light"><tr><th style="width: 40%">Question</th><th>Student\'s Answer</th><th>Status</th></tr></thead><tbody>';
-            for (const [qIdx, ans] of Object.entries(answers)) {
-                let displayAns = ans;
-                let questionText = `Question ${parseInt(qIdx) + 1}`;
-                let statusHtml = '-';
-                
-                const q = questions[qIdx];
-                if (q) {
-                    questionText = q.question || questionText;
-                    
-                    if (q.type === 'multichoice') {
-                        let optIdx = parseInt(ans);
-                        if (q.options && q.options[optIdx] !== undefined) {
-                            displayAns = q.options[optIdx];
-                        }
-                        if (optIdx === parseInt(q.correct)) {
-                            statusHtml = '<span class="badge badge-success">Correct</span>';
-                        } else {
-                            statusHtml = '<span class="badge badge-danger">Incorrect</span>';
-                        }
-                    } else if (q.type === 'truefalse') {
-                        let boolAns = (ans === 'true' || ans === true);
-                        displayAns = boolAns ? "True" : "False";
-                        let boolCorrect = (q.correct === 'true' || q.correct === true);
-                        if (boolAns === boolCorrect) {
-                            statusHtml = '<span class="badge badge-success">Correct</span>';
-                        } else {
-                            statusHtml = '<span class="badge badge-danger">Incorrect</span>';
-                        }
-                    } else if (q.type === 'matching') {
-                        if (typeof ans === 'object') {
-                            displayAns = "<ul>";
-                            let allCorrect = true;
-                            for (const [pIdx, matchVal] of Object.entries(ans)) {
-                                displayAns += `<li>Match ${parseInt(pIdx)+1}: ${escapeHtml(matchVal)}</li>`;
-                                if (q.pairs && q.pairs[pIdx]) {
-                                    if (matchVal !== q.pairs[pIdx].answer) {
-                                        allCorrect = false;
-                                    }
-                                }
-                            }
-                            displayAns += "</ul>";
-                            statusHtml = allCorrect ? '<span class="badge badge-success">Correct</span>' : '<span class="badge badge-warning">Partial/Incorrect</span>';
-                        }
-                    } else if (q.type === 'shortanswer' || q.type === 'essay') {
-                        statusHtml = '<span class="badge badge-secondary">Manual Grade</span>';
-                    }
-                }
-                
-                // If it's matching, displayAns already has HTML. Otherwise escape it.
-                if (q && q.type === 'matching') {
-                    html += `<tr><td><small>${escapeHtml(questionText)}</small></td><td>${displayAns}</td><td>${statusHtml}</td></tr>`;
-                } else {
-                    html += `<tr><td><small>${escapeHtml(questionText)}</small></td><td><strong>${escapeHtml(displayAns)}</strong></td><td>${statusHtml}</td></tr>`;
-                }
-            }
-            html += '</tbody></table>';
-        }
-        
-        const passageText = btn.getAttribute('data-passage') || '';
-        const miscuesRaw = btn.getAttribute('data-miscues');
-        const miscues = JSON.parse(miscuesRaw || '[]');
+    document.getElementById('details-student-name').innerText = attempts[0].student_name;
+    
+    document.getElementById('dashboard-main-view').classList.add('d-none');
+    document.getElementById('dashboard-details-view').classList.remove('d-none');
+    window.scrollTo(0, 0);
+    
+    renderDetailsBody(0, profId);
+}
 
-        const attId = btn.getAttribute('data-attid');
-        html += '<hr><h6 class="font-weight-bold mb-3 mt-4">🗣️ Phil-IRI Pronunciation & Miscue Analysis</h6>';
-        html += `<div class="mb-3"><audio controls src="serve_audio.php?id=${attId}" style="width: 100%; height: 40px;"></audio></div>`;
-        
-        const evaluationDataRaw = btn.getAttribute('data-evaluation');
-        let evaluationData = null;
-        try { evaluationData = JSON.parse(evaluationDataRaw || '{}'); } catch(e) {}
-        
-        if (!passageText) {
-            html += '<p class="text-muted">No passage text available.</p>';
-        } else {
-            // Phil-IRI Marked Passage
-            html += '<div class="card bg-light mb-3"><div class="card-body" style="font-size: 1.15rem; line-height: 2.2;">';
-            html += '<h6 class="text-secondary border-bottom pb-2 mb-3">Marked Passage Text (Phil-IRI Rules)</h6>';
-            
-            let markedHtml = '';
-            
-            if (evaluationData && evaluationData.word_results && evaluationData.word_results.length > 0) {
-                // Use perfectly aligned SequenceMatcher word results from backend!
-                evaluationData.word_results.forEach(wObj => {
-                    const et = wObj.error_type || "None";
-                    const wText = escapeHtml(wObj.word || "");
-                    
-                    if (et === "Omission") {
-                        markedHtml += `<span style="border: 2px solid #ef4444; border-radius: 50%; padding: 0 4px; margin: 0 2px; color: #ef4444; font-weight: bold;">${wText}</span> `;
-                    } else if (et === "Mispronunciation") {
-                        let spoken = wObj.spoken_word ? escapeHtml(wObj.spoken_word) : "(mis)";
-                        markedHtml += `<span style="display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; line-height:1;"><sup style="color:#d97706; font-size:0.7em; font-weight:bold;">${spoken}</sup><span style="text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-thickness: 3px; color: #b45309; font-weight: bold;">${wText}</span></span> `;
-                    } else if (et === "Substitution") {
-                        let spoken = wObj.spoken_word ? escapeHtml(wObj.spoken_word) : "(sub)";
-                        markedHtml += `<span style="display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; line-height:1;"><sup style="color:#2563eb; font-size:0.7em; font-weight:bold;">${spoken}</sup><span style="color: #1d4ed8; font-weight: bold;">${wText}</span></span> `;
-                    } else if (et === "Insertion") {
-                        markedHtml += `<span style="display:inline-flex; flex-direction:column; align-items:center; vertical-align:middle; line-height:1; margin-right: 4px;"><sup style="color:#16a34a; font-size:0.7em; font-weight:bold;">${wText}</sup><span style="color: #16a34a; font-weight: bold; font-size: 1.2em;">^</span></span>`;
-                    } else {
-                        markedHtml += `${wText} `;
-                    }
-                });
-            } else {
-                let words = passageText.split(/\s+/);
-                for (let i = 0; i < words.length; i++) {
-                    let w = words[i];
-                    if (!w.trim()) continue;
-                    
-                    let cleanW = w.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'?!]/g,"");
-                    let isMis = false;
-                    let isOmi = false;
-                    
-                    for(let k=0; k < miscues.length; k++) {
-                        if (miscues[k].word && miscues[k].word.toLowerCase() === cleanW) {
-                            if (miscues[k].errorType === 'Mispronunciation') isMis = true;
-                            if (miscues[k].errorType === 'Omission') isOmi = true;
-                            break;
-                        }
-                    }
-                    
-                    if (isOmi) {
-                        markedHtml += `<span style="border: 2px solid #ef4444; border-radius: 50%; padding: 0 4px; margin: 0 2px; color: #ef4444; font-weight: bold;">${w}</span> `;
-                    } else if (isMis) {
-                        markedHtml += `<span style="text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-thickness: 3px; color: #b45309; font-weight: bold;">${w}</span><sup style="color: #f59e0b;">(mis)</sup> `;
-                    } else {
-                        markedHtml += `${w} `;
-                    }
-                }
-            }
-            
-            html += markedHtml;
-            html += '</div></div>';
-            
-            // Raw Miscue Table
-            html += '<h6 class="text-secondary mt-3">Raw Azure Miscue Data</h6>';
-            if (miscues.length === 0) {
-                html += '<p class="text-muted">No miscues recorded or perfect reading!</p>';
-            } else {
-                html += '<table class="table table-sm table-bordered">';
-                html += '<thead class="thead-light"><tr><th>Word</th><th>Error Type</th><th>Accuracy</th></tr></thead><tbody>';
-                miscues.forEach(m => {
-                    let errColor = m.errorType === 'Omission' ? 'text-danger' : (m.errorType === 'Mispronunciation' ? 'text-warning' : 'text-info');
-                    html += `<tr><td><strong>${escapeHtml(m.word || '-')}</strong></td><td class="${errColor}">${escapeHtml(m.errorType || 'Unknown')}</td><td>${m.accuracyScore !== undefined ? m.accuracyScore + '%' : '-'}</td></tr>`;
-                });
-                html += '</tbody></table>';
-            }
-        }
-        
-        body.innerHTML = html;
-    } catch(e) {
-        body.innerHTML = '<p class="text-danger">Error parsing answers.</p>';
+function closeDetailsView() {
+    document.getElementById('dashboard-details-view').classList.add('d-none');
+    document.getElementById('dashboard-main-view').classList.remove('d-none');
+    window.scrollTo(0, 0);
+}
+
+function renderDetailsBody(idx, profId) {
+    const container = document.getElementById('details-content-area');
+    const attempts = stateData[profId];
+    const att = attempts[idx];
+    
+    let html = '<div class="d-flex w-100 border-bottom mb-4 pb-2 justify-content-center">';
+    
+    // Navbar for tests
+    attempts.forEach((a, i) => {
+        const isActive = (i === idx);
+        let color = isActive ? '#fff' : '#495057';
+        let bg = isActive ? '#0d6efd' : '#e9ecef';
+        let shadow = isActive ? 'shadow-sm' : '';
+        html += `<div onclick="renderDetailsBody(${i}, ${profId})" class="${shadow}" style="padding: 10px 30px; cursor: pointer; font-weight: bold; border-radius: 5px; color: ${color}; background: ${bg}; margin: 0 10px; transition: all 0.2s;">
+                    ${escapeHtml(a.test_name)}
+                 </div>`;
+    });
+    html += '</div>';
+    
+    // Check if it's Non-Reader (Level 3)
+    if (att.level_idx === 3) {
+        html += `<div class="row justify-content-center"><div class="col-md-10">
+                    <div class="card shadow-sm border-0">
+                        <div class="card-header bg-white"><h5 class="font-weight-bold mb-0 text-primary">📝 Comprehension Test Result</h5></div>
+                        <div class="card-body">
+                            ${renderComprehension(att)}
+                        </div>
+                    </div>
+                 </div></div>`;
+        container.innerHTML = html;
+        return;
     }
     
-    $('#answersModal').modal('show');
+    // STANDARD VIEW
+    
+    // Metrics Banner
+    let evaluationData = null;
+    try { evaluationData = JSON.parse(att.evaluation_data || '{}'); } catch(e) {}
+    const wordsCount = evaluationData && evaluationData.word_results ? evaluationData.word_results.length : 0;
+    
+    let miscuesCount = 0;
+    if (evaluationData && evaluationData.word_results) {
+        evaluationData.word_results.forEach(w => {
+            let et = w.error_type || "None";
+            if (et === "None" && w.accuracy_score !== undefined && w.accuracy_score < 60) et = "Mispronunciation";
+            if (et !== "None" && et !== "Insertion") miscuesCount++;
+        });
+    }
+    let wordsCorrectlyRead = wordsCount > 0 ? (wordsCount - miscuesCount) : 0;
+    let percentageCorrect = wordsCount > 0 ? ((wordsCorrectlyRead / wordsCount) * 100).toFixed(2) : 0;
+    
+    html += `<div class="row justify-content-center mb-4">
+                <div class="col-md-10">
+                    <div class="d-flex justify-content-around bg-white p-4 border rounded shadow-sm text-center">
+                        <div><div class="text-muted small text-uppercase font-weight-bold tracking-wide">Reading Speed</div><div class="font-weight-bold" style="font-size: 2rem; color: #0d6efd;">${att.wpm || 0} <span style="font-size: 1rem;">WPM</span></div></div>
+                        <div><div class="text-muted small text-uppercase font-weight-bold tracking-wide">Words Correct</div><div class="font-weight-bold" style="font-size: 2rem; color: #198754;">${wordsCorrectlyRead} <span style="font-size: 1rem;">/ ${wordsCount}</span></div></div>
+                        <div><div class="text-muted small text-uppercase font-weight-bold tracking-wide">Word Accuracy</div><div class="font-weight-bold" style="font-size: 2rem; color: #6610f2;">${percentageCorrect}%</div></div>
+                        <div><div class="text-muted small text-uppercase font-weight-bold tracking-wide">Comprehension</div><div class="font-weight-bold" style="font-size: 2rem; color: #fd7e14;">${att.comp || 0}%</div></div>
+                    </div>
+                </div>
+             </div>`;
+             
+    // Audio Player
+    html += `<div class="row justify-content-center mb-4">
+                <div class="col-md-10">
+                    <audio controls src="serve_audio.php?id=${att.id}" class="w-100 shadow-sm" style="border-radius: 50px;"></audio>
+                </div>
+             </div>`;
+             
+    // DROPDOWN SELECTOR
+    const accId = 'acc-' + att.id;
+    html += `<div class="row justify-content-center mb-3">
+                <div class="col-md-10">
+                    <select class="form-control form-control-lg shadow-sm font-weight-bold" style="border-radius: 10px; cursor: pointer; border: 2px solid #0d6efd; color: #0d6efd;" onchange="switchSection(this.value, '${att.id}')">
+                        <option value="transcript">🎙️ Transcript</option>
+                        <option value="pronounce">📊 Pronunciation Assessment</option>
+                        <option value="philiri">🗣️ Phil-IRI Style</option>
+                        <option value="comprehension">📝 Comprehension Test</option>
+                    </select>
+                </div>
+             </div>`;
+             
+    html += `<div class="row justify-content-center"><div class="col-md-10">`;
+    
+    // 1. Transcript
+    html += `
+        <div id="sec-transcript-${att.id}" class="card border-0 shadow-sm rounded">
+            <div class="card-body bg-white rounded" style="font-size: 1.1rem; line-height: 1.8;">
+                <h5 class="border-bottom pb-2 mb-3 text-primary">🎙️ Transcript</h5>
+                <span class="badge badge-info p-2 mr-2">[00:00]</span> ${escapeHtml(att.transcript || "No transcript available")}
+            </div>
+        </div>
+    `;
+    
+    // 2. Pronounce Assessment
+    html += `
+        <div id="sec-pronounce-${att.id}" class="card border-0 shadow-sm rounded d-none">
+            <div class="card-body bg-white rounded">
+                <h5 class="border-bottom pb-2 mb-3 text-primary">📊 Pronunciation Assessment</h5>
+                ${renderAzureDashboard(att)}
+            </div>
+        </div>
+    `;
+    
+    // 3. Phil-IRI Style
+    html += `
+        <div id="sec-philiri-${att.id}" class="card border-0 shadow-sm rounded d-none">
+            <div class="card-body bg-white rounded">
+                <h5 class="border-bottom pb-2 mb-3 text-primary">🗣️ Phil-IRI Style</h5>
+                ${renderPhilIri(att)}
+            </div>
+        </div>
+    `;
+    
+    // 4. Comprehension
+    html += `
+        <div id="sec-comprehension-${att.id}" class="card border-0 shadow-sm rounded d-none">
+            <div class="card-body bg-white rounded p-4">
+                <h5 class="border-bottom pb-3 mb-4 text-primary">📝 Comprehension Test</h5>
+                ${renderComprehension(att)}
+            </div>
+        </div>
+    `;
+    
+    html += `</div></div>`; // End sections
+    container.innerHTML = html;
+}
+
+function switchSection(sectionVal, attId) {
+    document.getElementById('sec-transcript-' + attId).classList.add('d-none');
+    document.getElementById('sec-pronounce-' + attId).classList.add('d-none');
+    document.getElementById('sec-philiri-' + attId).classList.add('d-none');
+    document.getElementById('sec-comprehension-' + attId).classList.add('d-none');
+    
+    document.getElementById('sec-' + sectionVal + '-' + attId).classList.remove('d-none');
+}
+
+function renderAzureDashboard(att) {
+    let evaluationData = null;
+    try { evaluationData = JSON.parse(att.evaluation_data || '{}'); } catch(e) {}
+    const finalWords = (evaluationData && evaluationData.word_results) ? evaluationData.word_results : [];
+    
+    let html = `<div style="font-size: 1.1rem; line-height: 2.2;">`;
+    if (finalWords.length > 0) {
+        finalWords.forEach(w => {
+            let et = w.error_type || "None";
+            if (et === "None" && w.accuracy_score !== undefined && w.accuracy_score < 60) et = "Mispronunciation";
+            let text = escapeHtml(w.word);
+            if (et === "Mispronunciation") {
+                html += `<span style="background-color: #ffe082; text-decoration: underline; padding: 2px 5px; border-radius: 4px; font-weight: bold;">${text}</span> `;
+            } else if (et === "Omission") {
+                html += `<span style="background-color: #9e9e9e; color: white; padding: 2px 5px; border-radius: 4px;">${text}</span> `;
+            } else if (et === "Insertion") {
+                html += `<span style="background-color: #ef5350; color: white; padding: 2px 5px; border-radius: 4px;">[+] ${escapeHtml(w.spoken_word || w.word)}</span> `;
+            } else {
+                html += text + " ";
+            }
+        });
+    } else {
+        html += `<span class="text-muted small">No data</span>`;
+    }
+    html += `</div>`;
+    return html;
+}
+
+function renderPhilIri(att) {
+    let evaluationData = null;
+    try { evaluationData = JSON.parse(att.evaluation_data || '{}'); } catch(e) {}
+    const finalWords = (evaluationData && evaluationData.word_results) ? evaluationData.word_results : [];
+    
+    let html = `<div style="font-size: 1.25rem; line-height: 2.5; font-family: 'Times New Roman', serif; padding: 15px;">`;
+    if (finalWords.length > 0) {
+        finalWords.forEach(w => {
+            let et = w.error_type || "None";
+            if (et === "None" && w.accuracy_score !== undefined && w.accuracy_score < 60) et = "Mispronunciation";
+            let word = escapeHtml(w.word);
+            let spoken = escapeHtml(w.spoken_word || "");
+            
+            if (et === "Mispronunciation") {
+                html += `<span style="display:inline-block; text-align:center; margin: 0 4px; vertical-align: bottom;">
+                            <span style="display:block; font-size:0.8rem; color:#d32f2f; line-height:1; margin-bottom:-4px;">${spoken || '?'}</span>
+                            <span style="text-decoration:underline;">${word}</span>
+                         </span>`;
+            } else if (et === "Omission") {
+                html += `<span style="display:inline-block; margin: 0 4px; border: 2px solid #d32f2f; border-radius: 50%; padding: 0 4px;">${word}</span>`;
+            } else if (et === "Substitution") {
+                html += `<span style="display:inline-block; text-align:center; margin: 0 4px; vertical-align: bottom;">
+                            <span style="display:block; font-size:0.8rem; color:#1976d2; line-height:1; margin-bottom:-4px;">${spoken}</span>
+                            <span>${word}</span>
+                         </span>`;
+            } else if (et === "Insertion") {
+                html += `<span style="display:inline-block; text-align:center; margin: 0 4px; vertical-align: bottom;">
+                            <span style="display:block; font-size:0.8rem; color:#388e3c; line-height:1; margin-bottom:-4px;">${spoken}</span>
+                            <span style="color:#388e3c; font-weight:bold;">^</span> ${word}
+                         </span>`;
+            } else if (et === "Repetition") {
+                html += `<span style="display:inline-block; margin: 0 4px; border-bottom: 2px wavy #fbc02d;">${word}</span>`;
+            } else {
+                html += `<span style="margin: 0 4px;">${word}</span>`;
+            }
+        });
+    } else {
+        html += `<span class="text-muted small">No data</span>`;
+    }
+    html += `</div>`;
+    return html;
+}
+
+function renderComprehension(att) {
+    const answers = JSON.parse(att.answers_json || '{}');
+    const questions = JSON.parse(att.questions_json || '[]');
+    const isPending = !att.classification || att.classification.includes("Pending");
+    
+    if (Object.keys(answers).length === 0) return '<div class="text-muted small">No answers.</div>';
+    
+    let html = '<div style="font-size: 1rem;">';
+    html += `<form id="manualGradeForm" method="POST" action="external_manage.php">
+                <input type="hidden" name="sesskey" value="<?php echo sesskey(); ?>">
+                <input type="hidden" name="action" value="manual_grade">
+                <input type="hidden" name="att_id" value="${att.id}">`;
+                
+    for (const [qIdx, ans] of Object.entries(answers)) {
+        let displayAns = ans;
+        let questionText = `Q${parseInt(qIdx) + 1}`;
+        let statusHtml = '';
+        
+        let q = null;
+        if (questions.length > 0) {
+            let actualQIdx = 0;
+            for (let k=0; k<questions.length; k++) {
+                if (parseInt(questions[k].level_idx || 0) === att.level_idx) {
+                    if (actualQIdx === parseInt(qIdx)) { q = questions[k]; break; }
+                    actualQIdx++;
+                }
+            }
+        }
+        
+        if (q && q.text) questionText = q.text;
+        
+        if (q) {
+            if (q.type === 'description') {
+                continue;
+            }
+            if (q.type === 'multichoice') {
+                let optIdx = parseInt(ans);
+                if (!isNaN(optIdx) && q.options && q.options[optIdx] !== undefined) {
+                    displayAns = escapeHtml(q.options[optIdx]);
+                }
+                
+                if (!isNaN(optIdx) && optIdx === parseInt(q.correct)) {
+                    statusHtml = '<span class="badge badge-success p-2">Correct</span>';
+                } else if (!isNaN(optIdx)) {
+                    statusHtml = '<span class="badge badge-danger p-2">Incorrect</span>';
+                }
+            } else if (q.type === 'truefalse') {
+                let boolAns = (ans === 'true' || ans === true || String(ans).toLowerCase() === 'true');
+                displayAns = boolAns ? "True" : "False";
+                let boolCorrect = (q.correct === 'true' || q.correct === true || String(q.correct).toLowerCase() === 'true');
+                
+                if (boolAns === boolCorrect) {
+                    statusHtml = '<span class="badge badge-success p-2">Correct</span>';
+                } else {
+                    statusHtml = '<span class="badge badge-danger p-2">Incorrect</span>';
+                }
+            } else if (q.type === 'matching') {
+                if (q.pairs) {
+                    let allCorrect = true;
+                    displayAns = "<ul style='margin:10px 0; padding-left:1.5rem;'>";
+                    for (const [pIdx, matchVal] of Object.entries(ans)) {
+                        displayAns += `<li>${escapeHtml(q.pairs[pIdx].question)} <span class="text-muted">➔</span> <strong>${escapeHtml(matchVal)}</strong></li>`;
+                        if (matchVal !== q.pairs[pIdx].answer) allCorrect = false;
+                    }
+                    displayAns += "</ul>";
+                    statusHtml = allCorrect ? '<span class="badge badge-success p-2">Correct</span>' : '<span class="badge badge-warning p-2">Partial/Incorrect</span>';
+                }
+            } else if (q.type === 'shortanswer' || q.type === 'essay') {
+                if (isPending) {
+                    statusHtml = `<select name="manual_grade_${qIdx}" class="form-control mt-2" style="max-width: 200px;">
+                                    <option value="1">Correct (1 pt)</option>
+                                    <option value="0" selected>Incorrect (0 pt)</option>
+                                  </select>`;
+                } else {
+                    statusHtml = '<span class="badge badge-info p-2">Manually Graded</span>';
+                }
+            }
+        }
+        
+        if (!statusHtml) statusHtml = '<span class="badge badge-secondary p-2">Pending</span>';
+        
+        html += `<div class="mb-4 pb-3 border-bottom">
+                    <strong style="font-size: 1.1rem; color: #343a40;">${escapeHtml(questionText)}</strong><br>
+                    <div class="mt-2 text-dark" style="font-size: 1.05rem;">${q && q.type === 'matching' ? displayAns : escapeHtml(displayAns)}</div>
+                    <div class="mt-2">${statusHtml}</div>
+                 </div>`;
+    }
+    
+    if (isPending) {
+        html += `<button type="submit" class="btn btn-primary btn-lg mt-3 w-100 font-weight-bold shadow-sm">Save Final Grade</button>`;
+    }
+    
+    html += '</form></div>';
+    return html;
 }
 </script>
 

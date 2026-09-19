@@ -19,6 +19,10 @@ window.ExternalReadingAssessment = (function() {
     let currentPassageIndex = 0;
     let noMatchCount = 0;
     let totalMiscuesCount = 0;
+    let uiTimerInterval = null;
+    let azureFinalWpmCount = 0;
+    let azurePartialWpmCount = 0;
+    let finalWordResultsList = [];
     
     let mainAudioRecorder = null;
     let mainAudioChunks = [];
@@ -32,12 +36,78 @@ window.ExternalReadingAssessment = (function() {
     let coachWs = null;
     let coachModeTargetIndex = -1;
 
+    function escapeHtml(unsafe) {
+        return (unsafe || "").toString()
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    }
+
+
+    function renderPhilIriLive() {
+        const container = document.getElementById("ra-philiri-transcript");
+        if (!container) return;
+
+        let html = "";
+        
+        passageTokens.forEach((token, index) => {
+            let state = philIriState[index] || { status: "None", spoken: "", insertionsBefore: [] };
+            let err = state.status;
+            let spoken = state.spoken;
+            
+            let remainingInsertions = state.insertionsBefore;
+            // Deduce Substitution: If Omission but there is an Insertion right before it
+            if (err === "Omission" && state.insertionsBefore.length > 0) {
+                err = "Substitution";
+                spoken = state.insertionsBefore.join(" ");
+                remainingInsertions = []; // Locally clear it so it doesn't double-render as an insertion
+            }
+
+            let topAnnotation = "";
+            let bottomAnnotation = "";
+            let wordStyle = "color: inherit;";
+
+            // Render remaining insertions first!
+            if (remainingInsertions.length > 0) {
+                let insText = remainingInsertions.join(" ");
+                html += `<span style="display: inline-flex; flex-direction: column; align-items: center; vertical-align: bottom; margin: 0 2px; line-height: 1.2;">
+                    <span style="font-size: 0.65rem; color: #059669; font-weight: bold; min-height: 1em;">${insText}</span>
+                    <span style="color: #059669;">^</span>
+                    <span style="font-size: 0.65rem; min-height: 1em;"></span>
+                </span>`;
+            }
+
+            if (err === "None") {
+                // Not read yet, or read correctly? If read correctly, we'll give it green if we want, but usually it's just normal text unless we explicitly mark it.
+                // Let's leave correct words green to show they were processed.
+                if (spoken !== "") wordStyle = "color: #059669;"; 
+            } else if (err === "Mispronunciation") {
+                wordStyle = "color: #d97706; text-decoration: underline; text-decoration-color: #d97706;";
+                bottomAnnotation = spoken;
+            } else if (err === "Omission") {
+                wordStyle = "color: #dc2626; border: 1px solid #dc2626; border-radius: 50%; padding: 0 4px;";
+            } else if (err === "Substitution") {
+                wordStyle = "color: #2563eb; text-decoration: line-through; text-decoration-color: #2563eb;";
+                topAnnotation = spoken;
+            } else if (err === "Repetition") {
+                wordStyle = "text-decoration: underline; text-decoration-style: wavy; text-decoration-color: #eab308;";
+            }
+
+            html += `<span style="display: inline-flex; flex-direction: column; align-items: center; vertical-align: bottom; margin: 0 2px; line-height: 1.2;">
+                <span style="font-size: 0.65rem; color: #2563eb; font-weight: bold; min-height: 1em;">${topAnnotation}</span>
+                <span style="${wordStyle}">${token}</span>
+                <span style="font-size: 0.65rem; color: #d97706; font-weight: bold; min-height: 1em;">${bottomAnnotation}</span>
+            </span>`;
+        });
+
+        container.innerHTML = html;
+    }
+
     function resetCoachTimer() {
+        // Coach mode is completely disabled in external assessment.
         if (coachTimer) clearTimeout(coachTimer);
-        if (currentPassageIndex < passageTokens.length) {
-            // Trigger coach if stuck for 15 seconds on the same word
-            coachTimer = setTimeout(() => window.triggerCoachMode(), 15000);
-        }
     }
 
     let currentCoachWord = "";
@@ -365,6 +435,7 @@ window.ExternalReadingAssessment = (function() {
     }
 
     let passageTokens = [];
+    let philIriState = [];
     let currentLevel = 0;
 
     function updateLevelUI() {
@@ -379,10 +450,12 @@ window.ExternalReadingAssessment = (function() {
 
         const rawWords = rawText.split(/\s+/);
         passageTokens = [];
+        philIriState = [];
         let html = "";
         rawWords.forEach((word, idx) => {
             if (word.trim().length > 0) {
                 passageTokens.push(word);
+                philIriState.push({ status: "None", spoken: "", insertionsBefore: [] });
                 html += `<span id="ra-ext-word-${idx}" style="transition: color 0.2s; display: inline-block; padding: 0 2px;">${word}</span> `;
             }
         });
@@ -533,9 +606,36 @@ window.ExternalReadingAssessment = (function() {
                         liveTranscript = "";
                         heldEvaluationData = null;
                         readingStartTime = Date.now();
+                        if (uiTimerInterval) clearInterval(uiTimerInterval);
+                        uiTimerInterval = setInterval(() => {
+                            if (!isRecording) return;
+                            const rTimeSec = Math.floor((Date.now() - readingStartTime) / 1000);
+                            const elTime = document.getElementById("sb-time");
+                            if (elTime) elTime.innerText = rTimeSec + "s";
+                            
+                            const wordsInPassage = passageTokens.length || 1;
+                            
+                            // Static Passage Word Count
+                            const elWc = document.getElementById("sb-word-count");
+                            if (elWc) elWc.innerText = wordsInPassage;
+                            
+                            if (rTimeSec > 0) {
+                                const wpm = ((azureFinalWpmCount + azurePartialWpmCount) / rTimeSec) * 60;
+                                const elSpeed = document.getElementById("sb-speed-calc");
+                                if (elSpeed) elSpeed.innerText = Math.round(wpm) + " WPM";
+                            }
+                            
+                            // Accuracy calculation (against total passage length)
+                            const acc = Math.max(0, ((wordsInPassage - totalMiscuesCount) / wordsInPassage) * 100);
+                            const elAcc = document.getElementById("sb-acc-calc");
+                            if (elAcc) elAcc.innerText = Math.round(acc) + "%";
+                            
+                        }, 1000);
                         prevPartialWords = [];
                         currentPassageIndex = 0;
                         noMatchCount = 0;
+                        azureFinalWpmCount = 0;
+                        azurePartialWpmCount = 0;
                         resetCoachTimer();
 
                         ws.send(JSON.stringify({
@@ -588,9 +688,29 @@ window.ExternalReadingAssessment = (function() {
                                 if (msg.type === "partial" || msg.type === "final") {
                                     const res = msg.result || {};
                                     const raw = res.detected ? res.detected.raw : (msg.text || "");
-                                    const wordResults = res.words || msg.word_results || [];
+                                    const wordResults = msg.words || res.words || msg.word_results || [];
+                                    
+                                    const validPassageWords = new Set(passageTokens.map(w => w.toLowerCase().replace(/[^\w\s]/g,"")).filter(w => w));
+
+                                    if (msg.type === "partial") {
+                                        const rawPartial = msg.result ? (msg.result.text || "") : (msg.text || "");
+                                        const words = rawPartial.trim().toLowerCase().replace(/[^\w\s]/g,"").split(/\s+/).filter(w => w);
+                                        
+                                        azurePartialWpmCount = 0;
+                                        for (let word of words) {
+                                            if (validPassageWords.has(word)) azurePartialWpmCount++;
+                                        }
+                                    }
 
                                     if (msg.type === "final") {
+                                        // 1. Process WPM Speedometer (Isolated from wordResults chunk)
+                                        const rawFinal = res.detected ? res.detected.raw : (msg.text || "");
+                                        const finalWords = rawFinal.trim().toLowerCase().replace(/[^\w\s]/g,"").split(/\s+/).filter(w => w);
+                                        for (let word of finalWords) {
+                                            if (validPassageWords.has(word)) azureFinalWpmCount++;
+                                        }
+                                        azurePartialWpmCount = 0;
+                                        
                                         liveTranscript += " " + raw;
                                         if (res.scores) {
                                             heldEvaluationData = { miscues: [], accuracy_score: res.scores.accuracy_score, comprehension_score: 0 };
@@ -608,7 +728,6 @@ window.ExternalReadingAssessment = (function() {
                                         const scoreRow = document.getElementById("ra-scorerow");
 
                                         if (pronunContainer) {
-                                            pronunContainer.style.display = "block";
                                             if (msg.type === "final") {
                                                 // Interim Phil-IRI Calculation
                                                 const wordsInPassage = passageTokens.length || 1;
@@ -641,39 +760,77 @@ window.ExternalReadingAssessment = (function() {
                                             let tdsT = document.createElement('td'); tdsT.style.border = "1px solid lightgrey"; scoreRow.appendChild(tdsT);
                                         }
 
+                                        finalWordResultsList = finalWordResultsList.concat(wordResults);
+                                        
                                         let foundMispronunciationIdx = -1;
 
                                         wordResults.forEach((wr, idx) => {
                                             let err = wr.error_type || "None";
                                             const acc = wr.accuracy_score || 0;
+                                            const wordText = wr.word || "";
                                             
                                             // Force low-scoring words to be treated as Mispronunciation even if Azure didn't flag them
                                             if (err === "None" && acc < 60) {
                                                 err = "Mispronunciation";
                                             }
+                                            
+
 
                                             let cleanWord = wordText.toLowerCase().replace(/[^\w]/g, "");
                                             let passageIdx = -1;
                                             
-                                            // Sliding window: first search forwards (up to 8 words)
-                                            for(let offset=0; offset<8; offset++){
+                                            // --- Smart Lookahead Algorithm ---
+                                            let verifyCount = Math.min(2, wordResults.length - 1 - idx); // Check up to 2 words ahead
+                                            
+                                            // Only run sliding window if it's NOT an explicit insertion
+                                            if (err !== "Insertion") {
+                                            
+                                            // 1. Search forwards (up to 100 words)
+                                            for(let offset=0; offset<100; offset++){
                                                 let checkIdx = currentPassageIndex + offset;
                                                 if(checkIdx < passageTokens.length){
                                                     let cleanPassage = passageTokens[checkIdx].toLowerCase().replace(/[^\w]/g, "");
                                                     if(cleanPassage === cleanWord){
+                                                        // If it's a massive jump, we MUST verify surrounding context
+                                                        if (offset > 5) {
+                                                            let isSolidMatch = true;
+                                                            for (let v = 1; v <= verifyCount; v++) {
+                                                                let nextSpoken = wordResults[idx + v].word.toLowerCase().replace(/[^\w]/g, "");
+                                                                let nextPassage = passageTokens[checkIdx + v] ? passageTokens[checkIdx + v].toLowerCase().replace(/[^\w]/g, "") : "";
+                                                                if (nextSpoken !== nextPassage) {
+                                                                    isSolidMatch = false; 
+                                                                    break;
+                                                                }
+                                                            }
+                                                            // Reject massive jumps on single common words if there's no context to verify it
+                                                            if (verifyCount === 0 || !isSolidMatch) continue; 
+                                                        }
                                                         passageIdx = checkIdx;
                                                         break;
                                                     }
                                                 }
                                             }
                                             
-                                            // If not found forward, search backwards (up to 15 words) in case they restarted a sentence
+                                            // 2. Search backwards (up to 30 words) for repetitions
                                             if (passageIdx === -1) {
-                                                for(let offset=1; offset<=15; offset++){
+                                                for(let offset=1; offset<=30; offset++){
                                                     let checkIdx = currentPassageIndex - offset;
                                                     if(checkIdx >= 0){
                                                         let cleanPassage = passageTokens[checkIdx].toLowerCase().replace(/[^\w]/g, "");
                                                         if(cleanPassage === cleanWord){
+                                                            // For backward jumps (repetitions), also require context if it's far
+                                                            if (offset > 5) {
+                                                                let isSolidMatch = true;
+                                                                for (let v = 1; v <= verifyCount; v++) {
+                                                                    let nextSpoken = wordResults[idx + v].word.toLowerCase().replace(/[^\w]/g, "");
+                                                                    let nextPassage = passageTokens[checkIdx + v] ? passageTokens[checkIdx + v].toLowerCase().replace(/[^\w]/g, "") : "";
+                                                                    if (nextSpoken !== nextPassage) {
+                                                                        isSolidMatch = false; 
+                                                                        break;
+                                                                    }
+                                                                }
+                                                                if (verifyCount === 0 || !isSolidMatch) continue; 
+                                                            }
                                                             passageIdx = checkIdx;
                                                             break;
                                                         }
@@ -681,11 +838,37 @@ window.ExternalReadingAssessment = (function() {
                                                 }
                                             }
                                             
+                                            } // End if (err !== "Insertion")
+                                            
+                                            let oldPassageIndex = currentPassageIndex;
                                             if(passageIdx === -1){
                                                 passageIdx = currentPassageIndex; 
                                             } else {
                                                 // Advance currentPassageIndex to the matched word's index + 1
                                                 currentPassageIndex = passageIdx + 1;
+                                            }
+                                            
+                                            // --- Phil-IRI Sequence Tracker ---
+                                            if (passageIdx < passageTokens.length) {
+                                                if (err === "Insertion") {
+                                                    philIriState[passageIdx].insertionsBefore.push(wordText);
+                                                } else {
+                                                    // Record skipped words as Omissions
+                                                    if (oldPassageIndex < passageIdx) {
+                                                        for (let i = oldPassageIndex; i < passageIdx; i++) {
+                                                            if (i < passageTokens.length) {
+                                                                philIriState[i].status = "Omission";
+                                                            }
+                                                        }
+                                                    }
+                                                    // Handle Repetitions (backward jumps)
+                                                    if (passageIdx < oldPassageIndex) {
+                                                        philIriState[passageIdx].status = "Repetition";
+                                                    } else {
+                                                        philIriState[passageIdx].status = err;
+                                                        philIriState[passageIdx].spoken = wordText;
+                                                    }
+                                                }
                                             }
                                             
                                             if (err === "None") {
@@ -800,9 +983,25 @@ window.ExternalReadingAssessment = (function() {
                                             }
                                         });
 
-                                        if (foundMispronunciationIdx !== -1) {
-                                            window.triggerCoachMode(foundMispronunciationIdx);
-                                        }
+                                        // Recalculate Phil-IRI Miscues Native Count from the Sequence Tracker
+                                        let computedMiscues = 0;
+                                        philIriState.forEach(st => {
+                                            if (st.status === "Omission" && st.insertionsBefore.length > 0) {
+                                                computedMiscues++; // Substitution counts as 1 miscue
+                                                computedMiscues += (st.insertionsBefore.length - 1); // Extra insertions
+                                            } else {
+                                                if (st.status !== "None") computedMiscues++;
+                                                computedMiscues += st.insertionsBefore.length;
+                                            }
+                                        });
+                                        totalMiscuesCount = computedMiscues;
+                                        const elMiscue = document.getElementById("sb-miscue-count");
+                                        if (elMiscue) elMiscue.innerText = totalMiscuesCount;
+
+                                        // Now that state is fully updated and computed, render the UI!
+                                        renderPhilIriLive();
+
+                                        // Coach Mode TTS is intentionally disabled for this assessment
                                     }
                                 } else if (msg.type === "assessment_report") {
                                     // Save the final perfectly calculated Azure sample scores and words
@@ -857,6 +1056,10 @@ window.ExternalReadingAssessment = (function() {
                 startBtn.innerHTML = "Processing...";
                 statusText.textContent = "Processing speech... Please answer the questions below.";
                 if (vadIndicator) vadIndicator.classList.remove("ra-vad-active");
+                
+                const pronunContainer = document.getElementById("ra-pronunciation-results");
+                if (pronunContainer) pronunContainer.style.display = "block";
+                
                 if (submitBtn) submitBtn.disabled = false;
             }
         });

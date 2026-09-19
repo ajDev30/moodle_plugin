@@ -41,6 +41,7 @@ $reading_time  = optional_param('reading_time', 0, PARAM_INT);
 $reading_speed = optional_param('reading_speed', 0.0, PARAM_FLOAT);
 $miscues       = optional_param('miscues_json', '[]', PARAM_RAW);
 $answers_raw   = optional_param('answers_json', '[]', PARAM_RAW);
+$evaluation_data = optional_param('evaluation_data', '{}', PARAM_RAW);
 
 $student_answers = json_decode($answers_raw, true) ?: [];
 
@@ -148,6 +149,7 @@ $attempt->reading_time = $reading_time;
 $attempt->reading_speed = $reading_speed;
 $attempt->miscues_json = $miscues;
 $attempt->answers_json = $answers_raw;
+$attempt->evaluation_data = $evaluation_data;
 $attempt->classification = $classification;
 $attempt->timecompleted = time();
 

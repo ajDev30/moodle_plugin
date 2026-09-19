@@ -20,7 +20,7 @@ if ($action === 'intake' && data_submitted()) {
     $consent = optional_param('consent', 0, PARAM_INT);
 
     if (empty($fullname) || empty($lrn) || empty($gender) || empty($age) || !$consent || empty($grade)) {
-        redirect(new moodle_url('/mod/readingassessment/external.php'), 'Please fill all required fields and agree to the consent.', null, \core\output\notification::NOTIFY_ERROR);
+        redirect(new moodle_url('/mod/readingassessment/external.php'), 'Please fill all required fields and agree to the consent.', null, \core\output\notificationotification::NOTIFY_ERROR);
     }
 
     $new_token = bin2hex(random_bytes(16));
@@ -38,6 +38,19 @@ if ($action === 'intake' && data_submitted()) {
     $DB->insert_record('readingassessment_ext_prof', $profile);
 
     redirect(new moodle_url('/mod/readingassessment/external.php', ['token' => $new_token]));
+}
+
+// Handle Resume Form Submission
+if ($action === 'resume' && data_submitted()) {
+    $resume_name = trim(optional_param('resume_name', '', PARAM_TEXT));
+    $resume_lrn = trim(optional_param('resume_lrn', '', PARAM_TEXT));
+    
+    $profile = $DB->get_record('readingassessment_ext_prof', ['lrn' => $resume_lrn, 'fullname' => $resume_name], '*', IGNORE_MULTIPLE);
+    if ($profile) {
+        redirect(new moodle_url('/mod/readingassessment/external.php', ['token' => $profile->token]));
+    } else {
+        redirect(new moodle_url('/mod/readingassessment/external.php'), 'No profile found with that Name and LRN.', null, \core\output\notification::NOTIFY_ERROR);
+    }
 }
 
 $PAGE->requires->css('/mod/readingassessment/styles.css');
@@ -106,6 +119,22 @@ if (empty($token)) {
 
                     <button type="submit" class="btn btn-primary btn-lg btn-block font-weight-bold shadow-sm">Start Assessment ➔</button>
                 </form>
+                
+                <hr class="my-4">
+                <h5 class="text-center text-muted mb-3">Already taken the assessment?</h5>
+                <form method="POST" action="external.php" class="bg-light p-4 rounded border">
+                    <input type="hidden" name="action" value="resume">
+                    <div class="form-group">
+                        <label class="font-weight-bold text-secondary">Full Name</label>
+                        <input type="text" name="resume_name" class="form-control" placeholder="Juan Dela Cruz" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="font-weight-bold text-secondary">LRN (Learner Reference Number)</label>
+                        <input type="text" name="resume_lrn" class="form-control" placeholder="123456789012" required>
+                    </div>
+                    <button type="submit" class="btn btn-outline-secondary btn-block font-weight-bold shadow-sm">Resume Assessment ➔</button>
+                </form>
+
             </div>
         </div>
     </div>
@@ -122,6 +151,21 @@ if (empty($token)) {
         echo '<div class="alert alert-warning m-4">No reading passage configured. Please contact your teacher.</div>';
         echo $OUTPUT->footer();
         exit;
+    }
+
+    // Check attempts for this profile
+    $attempts = $DB->get_records('readingassessment_ext_att', ['profileid' => $profile->id], 'level_idx ASC');
+    $starting_level = 0;
+    
+    if (!empty($attempts)) {
+        $last_attempt = end($attempts);
+        
+        if ($last_attempt->classification === 'Independent' || $last_attempt->classification === 'Instructional' || strpos($last_attempt->classification, 'Pending') !== false || strpos($last_attempt->classification, 'Manual') !== false || count($attempts) >= 4) {
+            redirect(new moodle_url('/mod/readingassessment/external_results.php', ['token' => $token]));
+        } else {
+            // They failed the last attempt, resume from next level
+            $starting_level = $last_attempt->level_idx + 1;
+        }
     }
 
     // Check expiration
@@ -149,25 +193,6 @@ if (empty($token)) {
         exit;
     }
 
-    // Check attempts for this profile
-    $attempts = $DB->get_records('readingassessment_ext_att', ['profileid' => $profile->id], 'level_idx ASC');
-    $starting_level = 0;
-    
-    if (!empty($attempts)) {
-        $last_attempt = end($attempts);
-        if ($last_attempt->classification === 'Independent' || $last_attempt->classification === 'Instructional' || count($attempts) >= 4) {
-            echo '<div class="container mt-5 text-center">';
-            echo '<h2 class="text-success mb-3">✅ Assessment Completed</h2>';
-            echo '<p class="lead text-muted">You have already completed this screening test. Thank you!</p>';
-            echo '</div>';
-            echo $OUTPUT->footer();
-            exit;
-        } else {
-            // They failed the last attempt, resume from next level
-            $starting_level = $last_attempt->level_idx + 1;
-        }
-    }
-
     $custom_questions = json_decode($passage_record->questions_json, true) ?: [];
 
     // Determine Dynamic Service Endpoint URL
@@ -188,35 +213,59 @@ if (empty($token)) {
 
         <div class="ra-card shadow-sm border-0">
             <div class="ra-card-title bg-light p-3 border-bottom mb-0">📖 Reading Passage</div>
-            <div class="ra-passage-box p-4" id="ra-passage-text" style="font-size: 1.25rem; line-height: 1.8;">
+            <div class="row m-0">
+                <div class="col-md-8 border-right p-0">
+                    <div class="ra-passage-box p-4" id="ra-passage-text" style="font-size: 1.25rem; line-height: 1.8;">
                 <?php echo nl2br(s($passage_record->passage)); ?>
             </div>
-            <!-- Removed ra-pronunciation-results completely as it was confusing for students and is now in the teacher dashboard -->
-
-            <!-- Coach Mode Isolation Card -->
-            <div id="ra-isolation-card" class="ra-isolation-card" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; width: 90%; max-width: 500px; border: 2px solid #8b5cf6; border-radius: 12px; background: #f5f3ff; box-shadow: 0 15px 50px rgba(0,0,0,0.4);">
-                <div class="ra-isolation-header" style="background: #8b5cf6; color: white; padding: 12px; font-weight: 700; text-align: center; border-radius: 10px 10px 0 0;">
-                    👩‍🏫 Teacher Sound-Out Guide
                 </div>
-                <div style="padding: 24px; text-align: center;">
-                    <div id="ra-iso-target-word" style="font-size: 3.5rem; font-weight: 900; color: #4c1d95; margin-bottom: 15px; letter-spacing: 0.05em;"></div>
-                    <div class="ra-phonetic-badge-container" style="display: flex; justify-content: center; gap: 15px; margin-bottom: 25px;">
-                        <span id="ra-iso-phonetic" style="background: white; padding: 6px 12px; border-radius: 8px; border: 1px solid #ddd; font-family: monospace; font-size: 1.2rem; color: #555;"></span>
-                        <span id="ra-iso-ipa" style="background: #ede9fe; padding: 6px 12px; border-radius: 8px; border: 1px solid #c4b5fd; font-family: monospace; font-size: 1.2rem; color: #6d28d9;"></span>
+                <div class="col-md-4 bg-light p-4">
+                    <h6 class="text-primary font-weight-bold mb-3 border-bottom pb-2">📊 Live Metrics</h6>
+                    <div class="d-flex justify-content-between mb-2 font-weight-bold" style="font-size: 0.9rem;">
+                        <span>No. word: <span id="sb-word-count" class="text-info">0</span></span>
+                        <span>No. Miscue: <span id="sb-miscue-count" class="text-danger">0</span></span>
+                        <span>Time: <span id="sb-time" class="text-success">0s</span></span>
                     </div>
-                    <div id="ra-iso-syllables" style="display: flex; justify-content: center; gap: 10px; margin-bottom: 25px; flex-wrap: wrap;"></div>
-                    <div id="ra-iso-transcript" style="text-align: center; color: #64748b; font-style: italic; min-height: 24px; margin-bottom: 15px;">(Listening...)</div>
-                    <div class="ra-blending-actions" style="display: flex; justify-content: center; gap: 10px;">
-                        <button class="btn btn-warning font-weight-bold shadow-sm" onclick="playCurrentCoachWord()">
-                            🔊 Hear Word
-                        </button>
-                        <button class="btn btn-outline-danger font-weight-bold shadow-sm" onclick="forceDismissCoachMode()">
-                            Skip ➡️
-                        </button>
+                    <hr>
+                    <div style="font-size: 0.8rem; color: #555;">
+                        <div class="mb-2"><strong>Reading Speed</strong> = (Words Read ÷ Time in Seconds) × 60</div>
+                        <div class="text-center font-weight-bold text-primary mb-3" style="font-size: 1.2rem;" id="sb-speed-calc">0 WPM</div>
+                        
+                        <div class="mb-2"><strong>Reading Accuracy</strong> = (Words - Miscues) ÷ Words × 100</div>
+                        <div class="text-center font-weight-bold text-primary mb-1" style="font-size: 1.2rem;" id="sb-acc-calc">0%</div>
                     </div>
                 </div>
             </div>
-
+            <div id="ra-live-summary"  style="display:none; padding: 20px; background: #e0f2fe; border-bottom: 1px solid #bae6fd; text-align: center;">
+                <div style="display: flex; justify-content: space-around;">
+                    <div><div style="font-size: 0.9rem; color: #0369a1;">Word Accuracy</div><div style="font-weight: bold; font-size: 1.5rem; color: #0284c7;" id="ra-summ-word-reading">-</div></div>
+                    <div><div style="font-size: 0.9rem; color: #0369a1;">Reading Speed</div><div style="font-weight: bold; font-size: 1.5rem; color: #0284c7;" id="ra-summ-wpm">-</div><small style="color: #0c4a6e;">WPM</small></div>
+                </div>
+            </div>
+            
+            <div id="ra-pronunciation-results" style="display:none; padding: 30px; background: #fff;">
+                <h5 class="mb-3 text-secondary border-bottom pb-2">🗣️ Phil-IRI Marked Transcript</h5>
+                
+                <div id="ra-philiri-transcript" class="p-3 bg-light rounded border" style="font-size: 1.25rem; line-height: 2.5; font-family: 'Times New Roman', serif;">
+                    <!-- JS will render Phil-IRI marked text here -->
+                </div>
+                
+                <div class="mt-4 p-3 border rounded bg-light" style="font-size: 0.85rem;">
+                    <strong>Legend:</strong><br>
+                    <div class="row mt-2">
+                        <div class="col-md-6">
+                            <div><span style="text-decoration:underline; font-weight:bold;">Mispronunciation</span> - Underlined with spoken word below</div>
+                            <div><span style="border: 1px solid #d32f2f; border-radius: 50%; padding: 0 4px; font-weight:bold;">Omission</span> - Circled with red border</div>
+                            <div><span style="color:#388e3c; font-weight:bold;">^</span> <strong>Insertion</strong> - Caret with inserted word above</div>
+                        </div>
+                        <div class="col-md-6">
+                            <div><span style="border-bottom: 2px wavy #fbc02d; font-weight:bold;">Repetition</span> - Wavy yellow underline</div>
+                            <div><span style="font-weight:bold; color:#1976d2;">Substitution</span> - Replaced word written above</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
             <div class="ra-controls p-4 bg-light text-center border-top">
                 <button id="ra-btn-start" class="btn btn-success btn-lg px-5 font-weight-bold shadow-sm rounded-pill">
                     🎙️ Start Reading
@@ -229,27 +278,12 @@ if (empty($token)) {
             </div>
 
             <div class="p-3 bg-light text-muted font-italic text-center" id="ra-live-transcript" style="min-height: 50px;"></div>
-        </div>
 
-        <!-- Custom Questions Section -->
-        <?php echo readingassessment_render_questions($custom_questions, 'ra-quiz-form', 'ra-btn-submit'); ?>
+            <div class="mt-4">
+                <?php echo readingassessment_render_questions($custom_questions, 'ra-quiz-form', 'ra-btn-submit'); ?>
+            </div>
 
-    </div>
-
-    <!-- Results Modal (replaces standard Moodle view.php reload) -->
-    <div id="external-thank-you" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; text-align: center;">
-        <div style="background: white; padding: 40px; border-radius: 12px; max-width: 600px; width: 90%;">
-            <h2 class="text-success mb-3">✅ Assessment Submitted!</h2>
-            <p class="lead text-muted mb-4">Your reading fluency and comprehension answers have been securely recorded. You may now close this page.</p>
-            <div style="margin: 20px 0; padding: 20px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
-                <h4 style="margin-bottom: 15px; color: #1e40af;">Oral Reading Profile</h4>
-                <div style="font-size: 1.5rem; font-weight: bold; text-transform: uppercase; color: #0f172a; margin-bottom: 15px;" id="final-classification">PENDING</div>
-                <div style="display: flex; justify-content: space-around; text-align: center;">
-                    <div><div style="font-size: 0.9rem; color: #64748b;">Word Reading</div><div style="font-weight: bold; font-size: 1.2rem;" id="final-word-score">-</div></div>
-                    <div><div style="font-size: 0.9rem; color: #64748b;">Comprehension</div><div style="font-weight: bold; font-size: 1.2rem;" id="final-comp-score">-</div></div>
-                    <div><div style="font-size: 0.9rem; color: #64748b;">Speed (WPM)</div><div style="font-weight: bold; font-size: 1.2rem;" id="final-wpm-score">-</div></div>
-                </div>
-                <div id="aral-status-message" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;"></div>
+            <div id="aral-status-message" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0;"></div>
             </div>
         </div>
     </div>
